@@ -18,7 +18,6 @@ try {
     $db = new PDO("sqlite:$db_file");
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // 创建表
     $db->exec("
         CREATE TABLE IF NOT EXISTS words (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,14 +29,12 @@ try {
         )
     ");
 
-    // 尝试添加唯一索引（忽略错误）
     try {
         $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_word_unique ON words(word COLLATE NOCASE)");
     } catch (PDOException $e) {
         error_log("唯一索引失败: " . $e->getMessage());
     }
 
-    // 清理重复单词：忽略大小写，保留 id 最小的一条
     try {
         $db->exec("
             DELETE FROM words
@@ -57,15 +54,9 @@ try {
 
 // ==================== 艾宾浩斯间隔 ====================
 $ebbinghaus_intervals = [
-    0 => 86400,      // 1天
-    1 => 172800,     // 2天
-    2 => 345600,     // 4天
-    3 => 604800,     // 7天
-    4 => 1296000,    // 15天
-    5 => 2592000,    // 30天
-    6 => 5184000,    // 60天
-    7 => 10368000,   // 120天
-    8 => 20736000    // 240天
+    0 => 86400, 1 => 172800, 2 => 345600, 3 => 604800,
+    4 => 1296000, 5 => 2592000, 6 => 5184000,
+    7 => 10368000, 8 => 20736000
 ];
 
 function calculate_next_review_time(int $level): int {
@@ -74,11 +65,46 @@ function calculate_next_review_time(int $level): int {
     return time() + $ebbinghaus_intervals[$level];
 }
 
-// ==================== 消息 ====================
+// ==================== 消息变量 ====================
 $message = '';
 
+// ==================== AJAX 搜索处理 ====================
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'search') {
+    header('Content-Type: application/json');
+    $word = trim($_POST['word'] ?? '');
+
+    if ($word === '') {
+        echo json_encode(['success' => false, 'message' => '<p style="color:red;">请输入单词</p>']);
+        exit;
+    }
+
+    try {
+        $stmt = $db->prepare("SELECT meaning FROM words WHERE word COLLATE NOCASE = ?");
+        $stmt->execute([$word]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($row) {
+            echo json_encode([
+                'success' => true,
+                'found' => true,
+                'meaning' => $row['meaning'],
+                'message' => "<p style='color:orange'>已找到单词 <strong>$word</strong>，释义已自动填充</p>"
+            ]);
+        } else {
+            echo json_encode([
+                'success' => true,
+                'found' => false,
+                'message' => "<p style='color:red;'>未找到单词：<strong>$word</strong>，可直接添加</p>"
+            ]);
+        }
+    } catch (PDOException $e) {
+        echo json_encode(['success' => false, 'message' => '<p style="color:red;">搜索失败，请重试</p>']);
+    }
+    exit;
+}
+
 // ==================== 添加/更新单词 ====================
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['new_word'])) {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['new_word']) && !isset($_POST['action'])) {
     $word    = trim($_POST['new_word']);
     $meaning = trim($_POST['new_meaning']);
 
@@ -86,18 +112,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['new_word'])) {
         $message = '<p style="color:red;">请填写完整！</p>';
     } else {
         try {
-            // 查重（忽略大小写）
             $check = $db->prepare("SELECT id FROM words WHERE word COLLATE NOCASE = ?");
             $check->execute([$word]);
             $row = $check->fetch(PDO::FETCH_ASSOC);
 
             if ($row) {
-                // 更新
                 $db->prepare("UPDATE words SET meaning = ? WHERE id = ?")
                    ->execute([$meaning, $row['id']]);
                 $message = "<p style='color:orange'>单词 <strong>$word</strong> 已更新释义</p>";
             } else {
-                // 插入
                 $db->prepare("
                     INSERT INTO words (word, meaning, last_studied_at, next_review_at, memory_level)
                     VALUES (?, ?, 0, 0, 0)
@@ -105,7 +128,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['new_word'])) {
                 $message = "<p style='color:green'>添加成功: <strong>$word</strong></p>";
             }
         } catch (PDOException $e) {
-            // 唯一约束冲突 → 说明有重复
             if ($e->getCode() == 23000) {
                 $message = "<p style='color:orange'>单词 <strong>$word</strong> 已存在，释义已覆盖</p>";
                 $db->prepare("UPDATE words SET meaning = ? WHERE word COLLATE NOCASE = ?")
@@ -167,6 +189,10 @@ try {
 function format_time(int $ts): string {
     return $ts == 0 ? "新词" : date('m-d H:i', $ts);
 }
+
+// 获取表单保留值（防止提交后丢失）
+$retain_word = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_word'] ?? '') : '';
+$retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning'] ?? '') : '';
 ?>
 
 <!DOCTYPE html>
@@ -174,6 +200,7 @@ function format_time(int $ts): string {
 <head>
     <meta charset="UTF-8">
     <title>艾宾浩斯单词本</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
         body {font-family: system-ui, sans-serif; padding:20px; max-width:800px; margin:auto;}
         .msg {padding:10px; margin:10px 0; border-radius:4px; font-weight:bold;}
@@ -185,18 +212,31 @@ function format_time(int $ts): string {
         .due {border-left:5px solid #dc3545;}
         .ok  {border-left:5px solid #28a745;}
         textarea {width:100%; font-family:inherit;}
-        button {padding:8px 16px; cursor:pointer;}
+        button {padding:8px 16px; cursor:pointer; margin:0 5px;}
+        .input-group {display:flex; gap:5px; align-items:center;}
+        .input-group input {flex:1;}
+        .search-btn {background:#007bff; color:white; border:none; border-radius:4px; padding:8px 12px; font-size:0.9em;}
+        .search-btn:hover {background:#0056b3;}
+        .search-btn:disabled {background:#ccc; cursor:not-allowed;}
     </style>
 </head>
 <body>
 
 <h1>艾宾浩斯单词复习</h1>
 
-<?php if ($message) echo "<div class='msg'>$message</div>"; ?>
+<!-- 消息显示区 -->
+<div id="messageContainer">
+    <?php if ($message): ?>
+        <div class="msg"><?= $message ?></div>
+    <?php endif; ?>
+</div>
 
-<form method="POST">
-    <p><input type="text" name="new_word" placeholder="输入单词" required style="width:180px;"></p>
-    <p><textarea name="new_meaning" placeholder="输入释义" rows="3" required></textarea></p>
+<form method="POST" id="addForm">
+    <div class="input-group">
+        <input type="text" name="new_word" id="new_word" placeholder="输入单词" required value="<?= htmlspecialchars($retain_word) ?>">
+        <button type="button" class="search-btn" id="searchBtn">搜索</button>
+    </div>
+    <p><textarea name="new_meaning" id="new_meaning" placeholder="输入释义" rows="6" required><?= htmlspecialchars($retain_meaning) ?></textarea></p>
     <p><button type="submit">添加/更新</button></p>
 </form>
 
@@ -226,6 +266,60 @@ function format_time(int $ts): string {
         </form>
     </div>
 <?php endforeach; endif; ?>
+
+<script>
+$(document).ready(function() {
+    const $msgContainer = $('#messageContainer');
+    const $wordInput = $('#new_word');
+    const $meaningInput = $('#new_meaning');
+    const $searchBtn = $('#searchBtn');
+
+    $searchBtn.on('click', function() {
+        const word = $wordInput.val().trim();
+        if (!word) {
+            showMessage('<p style="color:red;">请输入单词</p>');
+            return;
+        }
+
+        $searchBtn.prop('disabled', true).text('搜索中...');
+
+        $.post('', {
+            action: 'search',
+            word: word
+        }, function(res) {
+            if (res.success) {
+                if (res.found) {
+                    $meaningInput.val(res.meaning);
+                    showMessage(res.message);
+                } else {
+                    $meaningInput.val('').focus();
+                    showMessage(res.message);
+                }
+            } else {
+                showMessage(res.message || '<p style="color:red;">搜索失败</p>');
+            }
+        }, 'json').fail(function() {
+            showMessage('<p style="color:red;">网络错误，请重试</p>');
+        }).always(function() {
+            $searchBtn.prop('disabled', false).text('搜索');
+        });
+    });
+
+    // 回车触发搜索
+    $wordInput.on('keypress', function(e) {
+        if (e.which === 13) {
+            e.preventDefault();
+            $searchBtn.click();
+        }
+    });
+
+    // 显示消息函数
+    function showMessage(html) {
+        $msgContainer.html('<div class="msg">' + html + '</div>');
+        $('html, body').animate({ scrollTop: 0 }, 300);
+    }
+});
+</script>
 
 </body>
 </html>
