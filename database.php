@@ -1,5 +1,5 @@
 <?php
-// database.php - 带登录、防暴力破解、last_studied_at 可编辑
+// database.php - 带登录、防暴力破解、分页、last_studied_at 可编辑
 session_start();
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -10,6 +10,7 @@ $auth_file = 'auth.json';
 $lockout_file = 'lockout.json';
 $max_attempts = 5;
 $lockout_duration = 15 * 60;
+$per_page = 20;  // 每页50个
 
 // === 工具函数 ===
 function get_client_ip() {
@@ -128,7 +129,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     $username = trim($_POST['username']);
     $password = $_POST['password'];
 
-    if ($username !== 'admin') {
+    if ($username !== 'gongchengra@gmail.com') {
         record_failed_login($ip, $username);
         show_login_form("用户名错误");
     }
@@ -202,7 +203,7 @@ function format_time($timestamp) {
     return $timestamp == 0 ? "N/A" : date('Y-m-d H:i', $timestamp);
 }
 
-// === AJAX 更新（含 last_studied_at）===
+// === AJAX 更新 ===
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update') {
     header('Content-Type: application/json');
     $id = (int)$_POST['id'];
@@ -234,7 +235,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $stmt = $db->prepare($sql);
         $stmt->execute($params);
 
-        // 查询更新后的值
         $stmt = $db->prepare("SELECT last_studied_at, next_review_at, memory_level FROM words WHERE id = ?");
         $stmt->execute([$id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -251,12 +251,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
-// === 获取所有单词 ===
+// === 分页逻辑 ===
+$page = max(1, (int)($_GET['page'] ?? 1));
+$offset = ($page - 1) * $per_page;
+
+// 获取总数
+$total_stmt = $db->query("SELECT COUNT(*) FROM words");
+$total_words = $total_stmt->fetchColumn();
+$total_pages = max(1, ceil($total_words / $per_page));
+
+// 获取当前页数据
 try {
-    $stmt = $db->query("SELECT * FROM words ORDER BY memory_level ASC");
-    $all_words = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $db->prepare("SELECT * FROM words ORDER BY memory_level ASC LIMIT :limit OFFSET :offset");
+    $stmt->bindValue(':limit', $per_page, PDO::PARAM_INT);
+    $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+    $stmt->execute();
+    $words = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     die("查询失败: " . $e->getMessage());
+}
+
+// 生成分页链接
+function page_url($p) {
+    return '?' . http_build_query(array_merge($_GET, ['page' => $p]));
 }
 ?>
 
@@ -271,7 +288,7 @@ try {
         .header { display: flex; justify-content: space-between; align-items: center; background: #4CAF50; color: white; padding: 10px 20px; border-radius: 5px; margin-bottom: 20px; }
         .header a { color: white; text-decoration: none; font-size: 0.9em; }
         h1 { margin: 0; font-size: 1.5em; }
-        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        table { width: 100%; border-collapse: collapse; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
         th { background: #4CAF50; color: white; }
         tr:hover { background: #f1f1f1; }
@@ -281,6 +298,15 @@ try {
         .cancel-btn { background: #f44336; }
         input, select { width: 100%; padding: 5px; box-sizing: border-box; }
         .editing { background: #fffde7; }
+        .pagination { text-align: center; margin: 20px 0; }
+        .pagination a, .pagination span {
+            display: inline-block; padding: 8px 12px; margin: 0 4px;
+            background: #fff; border: 1px solid #ddd; border-radius: 4px;
+            text-decoration: none; color: #333; font-size: 0.9em;
+        }
+        .pagination a:hover { background: #f0f0f0; }
+        .pagination .current { background: #4CAF50; color: white; border-color: #4CAF50; }
+        .pagination .disabled { color: #aaa; cursor: not-allowed; }
         .count { color: #ddd; font-size: 0.9em; }
     </style>
 </head>
@@ -289,7 +315,7 @@ try {
 <div class="header">
     <h1>单词数据库管理</h1>
     <div>
-        <span class="count">共 <?= count($all_words) ?> 个单词</span> |
+        <span class="count">共 <?= $total_words ?> 个单词 | 第 <?= $page ?> / <?= $total_pages ?> 页</span> |
         <a href="?logout=1">登出</a>
     </div>
 </div>
@@ -306,7 +332,7 @@ try {
         </tr>
     </thead>
     <tbody>
-        <?php foreach ($all_words as $w): ?>
+        <?php foreach ($words as $w): ?>
         <tr data-id="<?= $w['id'] ?>">
             <td><strong><?= htmlspecialchars($w['word']) ?></strong></td>
             <td style="max-width:300px; word-wrap:break-word;"><?= nl2br(htmlspecialchars($w['meaning'])) ?></td>
@@ -341,6 +367,35 @@ try {
     </tbody>
 </table>
 
+<!-- 分页导航 -->
+<div class="pagination">
+    <?php if ($page > 1): ?>
+        <a href="<?= page_url($page - 1) ?>">上一页</a>
+    <?php else: ?>
+        <span class="disabled">上一页</span>
+    <?php endif; ?>
+
+    <?php
+    $start = max(1, $page - 2);
+    $end = min($total_pages, $page + 2);
+    if ($start > 1) echo '<span>...</span>';
+    for ($i = $start; $i <= $end; $i++): ?>
+        <?php if ($i == $page): ?>
+            <span class="current"><?= $i ?></span>
+        <?php else: ?>
+            <a href="<?= page_url($i) ?>"><?= $i ?></a>
+        <?php endif; ?>
+    <?php endfor;
+    if ($end < $total_pages) echo '<span>...</span>';
+    ?>
+
+    <?php if ($page < $total_pages): ?>
+        <a href="<?= page_url($page + 1) ?>">下一页</a>
+    <?php else: ?>
+        <span class="disabled">下一页</span>
+    <?php endif; ?>
+</div>
+
 <script>
 $(document).ready(function() {
     let originalLevel, originalLast, originalNext;
@@ -356,7 +411,6 @@ $(document).ready(function() {
         row.find('.level-display, .last-display, .time-display, .edit-btn').hide();
         row.find('.level-input, .last-preset, .time-preset, .save-btn, .cancel-btn').show();
 
-        // 设置上次学习时间
         const lastTs = row.find('.last-display').data('timestamp') || 0;
         if (lastTs > 0) {
             const d = new Date(lastTs * 1000);
@@ -366,7 +420,6 @@ $(document).ready(function() {
         row.find('.last-preset').val('keep');
         row.find('.last-input').hide();
 
-        // 设置下次复习时间
         const nextTs = row.find('.time-display').data('timestamp') || 0;
         if (nextTs > 0) {
             const d = new Date(nextTs * 1000);
@@ -378,13 +431,11 @@ $(document).ready(function() {
     });
 
     $(document).on('change', '.last-preset', function() {
-        const input = $(this).closest('td').find('.last-input');
-        input.toggle($(this).val() === 'custom');
+        $(this).closest('td').find('.last-input').toggle($(this).val() === 'custom');
     });
 
     $(document).on('change', '.time-preset', function() {
-        const input = $(this).closest('td').find('.time-input');
-        input.toggle($(this).val() === 'custom');
+        $(this).closest('td').find('.time-input').toggle($(this).val() === 'custom');
     });
 
     $(document).on('click', '.cancel-btn', function() {
