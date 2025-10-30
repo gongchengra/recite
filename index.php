@@ -1,18 +1,24 @@
 <?php
+// ==================== 配置 ====================
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
-// 数据库连接
+
+// ==================== 数据库 ====================
 $db_file = 'words.sqlite';
-if (!is_writable($db_file) && file_exists($db_file)) {
-    die("数据库文件 $db_file 不可写，请检查权限。");
+
+if (file_exists($db_file) && !is_writable($db_file)) {
+    die("数据库文件 $db_file 不可写");
 }
 if (!is_writable(dirname($db_file))) {
-    die("数据库目录 " . dirname($db_file) . " 不可写，请检查权限。");
+    die("数据库目录不可写");
 }
+
 try {
     $db = new PDO("sqlite:$db_file");
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    // 创建表
     $db->exec("
         CREATE TABLE IF NOT EXISTS words (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,169 +29,203 @@ try {
             memory_level INTEGER DEFAULT 0
         )
     ");
+
+    // 尝试添加唯一索引（忽略错误）
+    try {
+        $db->exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_word_unique ON words(word COLLATE NOCASE)");
+    } catch (PDOException $e) {
+        error_log("唯一索引失败: " . $e->getMessage());
+    }
+
+    // 清理重复单词：忽略大小写，保留 id 最小的一条
+    try {
+        $db->exec("
+            DELETE FROM words
+            WHERE id NOT IN (
+                SELECT MIN(id)
+                FROM words
+                GROUP BY lower(word)
+            )
+        ");
+    } catch (PDOException $e) {
+        error_log("清理重复失败: " . $e->getMessage());
+    }
+
 } catch (PDOException $e) {
-    die("数据库连接或表创建失败: " . $e->getMessage());
+    die("数据库初始化失败: " . $e->getMessage());
 }
+
+// ==================== 艾宾浩斯间隔 ====================
 $ebbinghaus_intervals = [
-    0 => 1 * 86400,
-    1 => 2 * 86400,
-    2 => 4 * 86400,
-    3 => 7 * 86400,
-    4 => 15 * 86400,
-    5 => 30 * 86400,
-    6 => 60 * 86400,
-    7 => 120 * 86400,
-    8 => 240 * 86400
+    0 => 86400,      // 1天
+    1 => 172800,     // 2天
+    2 => 345600,     // 4天
+    3 => 604800,     // 7天
+    4 => 1296000,    // 15天
+    5 => 2592000,    // 30天
+    6 => 5184000,    // 60天
+    7 => 10368000,   // 120天
+    8 => 20736000    // 240天
 ];
-function calculate_next_review_time($current_level) {
+
+function calculate_next_review_time(int $level): int {
     global $ebbinghaus_intervals;
-    $level = min($current_level, count($ebbinghaus_intervals) - 1);
+    $level = min($level, count($ebbinghaus_intervals) - 1);
     return time() + $ebbinghaus_intervals[$level];
 }
-// 处理单词提交
+
+// ==================== 消息 ====================
+$message = '';
+
+// ==================== 添加/更新单词 ====================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['new_word'])) {
-	$word = trim($_POST['new_word']);
-	$meaning = trim($_POST['new_meaning']);
-	if (!empty($word) && !empty($meaning)) {
-		try {
-            // 1. 检查是否已存在
-            $check = $db->prepare("SELECT id, meaning FROM words WHERE word = ?");
+    $word    = trim($_POST['new_word']);
+    $meaning = trim($_POST['new_meaning']);
+
+    if ($word === '' || $meaning === '') {
+        $message = '<p style="color:red;">请填写完整！</p>';
+    } else {
+        try {
+            // 查重（忽略大小写）
+            $check = $db->prepare("SELECT id FROM words WHERE word COLLATE NOCASE = ?");
             $check->execute([$word]);
             $row = $check->fetch(PDO::FETCH_ASSOC);
 
             if ($row) {
-                // 2. 已存在 → 更新释义
-                $upd = $db->prepare("UPDATE words SET meaning = ? WHERE id = ?");
-                $upd->execute([$meaning, $row['id']]);
-                $message = '<p style="color:orange;">单词 <strong>'
-                    . htmlspecialchars($word)
-                    . '</strong> 已存在，释义已更新为最新内容。</p>';
+                // 更新
+                $db->prepare("UPDATE words SET meaning = ? WHERE id = ?")
+                   ->execute([$meaning, $row['id']]);
+                $message = "<p style='color:orange'>单词 <strong>$word</strong> 已更新释义</p>";
             } else {
-                // 3. 不存在 → 插入新词
-                $ins = $db->prepare(
-                    "INSERT INTO words (word, meaning, last_studied_at, next_review_at, memory_level)
-                     VALUES (?, ?, 0, 0, 0)"
-                );
-                $ins->execute([$word, $meaning]);
-                $message = '<p style="color:green;">新单词 <strong>'
-                    . htmlspecialchars($word)
-                    . '</strong> 添加成功！</p>';
+                // 插入
+                $db->prepare("
+                    INSERT INTO words (word, meaning, last_studied_at, next_review_at, memory_level)
+                    VALUES (?, ?, 0, 0, 0)
+                ")->execute([$word, $meaning]);
+                $message = "<p style='color:green'>添加成功: <strong>$word</strong></p>";
             }
         } catch (PDOException $e) {
-            $message = '<p style="color:red;">操作失败: ' . htmlspecialchars($e->getMessage()) . '</p>';
+            // 唯一约束冲突 → 说明有重复
+            if ($e->getCode() == 23000) {
+                $message = "<p style='color:orange'>单词 <strong>$word</strong> 已存在，释义已覆盖</p>";
+                $db->prepare("UPDATE words SET meaning = ? WHERE word COLLATE NOCASE = ?")
+                   ->execute([$meaning, $word]);
+            } else {
+                $message = "<p style='color:red'>错误: " . htmlspecialchars($e->getMessage()) . "</p>";
+            }
         }
-	}
+    }
 }
-// 处理复习操作
+
+// ==================== 复习 ====================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['review_id'])) {
-	$word_id = (int)$_POST['review_id'];
-	$current_time = time();try {
-	$stmt = $db->prepare("SELECT memory_level FROM words WHERE id = ?");
-	$stmt->execute([$word_id]);
-	$current_level = (int)$stmt->fetchColumn();
+    $id = (int)$_POST['review_id'];
+    $now = time();
 
-	if ($current_level === false) {
-		die("未找到单词 ID: $word_id");
-	}
+    try {
+        $stmt = $db->prepare("SELECT memory_level FROM words WHERE id = ?");
+        $stmt->execute([$id]);
+        $level = (int)$stmt->fetchColumn();
 
-	$new_level = min($current_level + 1, count($ebbinghaus_intervals) - 1);
-	$next_review_at = calculate_next_review_time($new_level);
+        if ($level === false) {
+            $message = "<p style='color:red'>单词不存在</p>";
+        } else {
+            $new_level = min($level + 1, count($ebbinghaus_intervals) - 1);
+            $next = calculate_next_review_time($new_level);
 
-	$stmt = $db->prepare("UPDATE words SET last_studied_at = ?, next_review_at = ?, memory_level = ? WHERE id = ?");
-	$stmt->execute([$current_time, $next_review_at, $new_level, $word_id]);
+            $db->prepare("
+                UPDATE words
+                SET last_studied_at = ?, next_review_at = ?, memory_level = ?
+                WHERE id = ?
+            ")->execute([$now, $next, $new_level, $id]);
 
-	header("Location: " . $_SERVER['PHP_SELF']);
-	exit;
-	} catch (PDOException $e) {
-		die("更新复习记录失败: " . $e->getMessage() . " (SQLSTATE: " . $e->getCode() . ")");
-	}
+            $message = "<p style='color:green'>复习成功！下次：".date('Y-m-d', $next)."</p>";
+        }
+    } catch (PDOException $e) {
+        $message = "<p style='color:red'>复习失败</p>";
+    }
 }
-// 数据获取
-$current_time = time();
+
+// ==================== 查询今日单词 ====================
 $today_start = strtotime('today');
-$today_end   = $today_start + 86399;try {
-$stmt = $db->prepare("
-		SELECT * FROM words
-		WHERE next_review_at = 0
-		   OR next_review_at BETWEEN :today_start AND :today_end
-		ORDER BY next_review_at ASC
-		LIMIT 50
-	");
-	$stmt->bindParam(':today_start', $today_start, PDO::PARAM_INT);
-	$stmt->bindParam(':today_end',   $today_end,   PDO::PARAM_INT);
-	$stmt->execute();
-	$words_to_review = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$today_end   = $today_start + 86399;
+
+try {
+    $stmt = $db->prepare("
+        SELECT * FROM words
+        WHERE next_review_at = 0
+           OR next_review_at BETWEEN ? AND ?
+        ORDER BY next_review_at ASC
+        LIMIT 50
+    ");
+    $stmt->execute([$today_start, $today_end]);
+    $words_to_review = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
-	die("查询单词失败: " . $e->getMessage() . " (SQLSTATE: " . $e->getCode() . ")");
+    die("查询失败: " . $e->getMessage());
 }
-function format_time($timestamp) {
-	if ($timestamp === 0) {
-		return "N/A (新词)";
-	}
-	return date('Y-m-d H:i:s', $timestamp);
+
+function format_time(int $ts): string {
+    return $ts == 0 ? "新词" : date('m-d H:i', $ts);
 }
 ?>
+
 <!DOCTYPE html>
 <html lang="zh">
 <head>
-	<meta charset="UTF-8">
-	<title>艾宾浩斯单词记忆系统</title>
-	<style>
-		body { font-family: Arial, sans-serif; line-height: 1.6; padding: 20px; }
-		.word-list { margin-top: 20px; }
-		.word-item { border: 1px solid #ccc; padding: 15px; margin-bottom: 10px; }
-		.review-status { font-size: 0.9em; color: #555; margin-top: 5px; }
-		.needs-review { border-left: 5px solid red; }
-		.well-known { border-left: 5px solid green; }
-		.new-word { border-left: 5px solid blue; }
-		form { display: inline; }
-	</style>
+    <meta charset="UTF-8">
+    <title>艾宾浩斯单词本</title>
+    <style>
+        body {font-family: system-ui, sans-serif; padding:20px; max-width:800px; margin:auto;}
+        .msg {padding:10px; margin:10px 0; border-radius:4px; font-weight:bold;}
+        .success {background:#d4edda; color:#155724;}
+        .warning {background:#fff3cd; color:#856404;}
+        .error   {background:#f8d7da; color:#721c24;}
+        .card {border:1px solid #ddd; padding:15px; margin:10px 0; border-radius:6px;}
+        .new {border-left:5px solid #007bff;}
+        .due {border-left:5px solid #dc3545;}
+        .ok  {border-left:5px solid #28a745;}
+        textarea {width:100%; font-family:inherit;}
+        button {padding:8px 16px; cursor:pointer;}
+    </style>
 </head>
 <body>
-<h1>单词记忆复习板 (10 个一组)</h1>
-<h2>手动添加单词</h2>
+
+<h1>艾宾浩斯单词复习</h1>
+
+<?php if ($message) echo "<div class='msg'>$message</div>"; ?>
+
 <form method="POST">
-	<label for="new_word">单词:</label>
-	<input type="text" id="new_word" name="new_word" required>
-<label for="new_meaning">释义:</label>
-<textarea id="new_meaning" name="new_meaning" required rows="5" cols="50"></textarea>
-<button type="submit">添加单词</button>
+    <p><input type="text" name="new_word" placeholder="输入单词" required style="width:180px;"></p>
+    <p><textarea name="new_meaning" placeholder="输入释义" rows="3" required></textarea></p>
+    <p><button type="submit">添加/更新</button></p>
 </form>
+
 <hr>
-<div class="word-list">
-	<?php if (empty($words_to_review)): ?>
-		<p>没有需要复习或新的单词了！请添加更多单词。</p>
-	<?php endif; ?>
 
-<?php foreach ($words_to_review as $word):
-	$is_due = $word['next_review_at'] > 0 && $word['next_review_at'] <= $current_time;
-	$class = $word['memory_level'] == 0 ? 'new-word' : ($is_due ? 'needs-review' : 'well-known');
+<?php if (empty($words_to_review)): ?>
+    <p>暂无待复习单词</p>
+<?php else: foreach ($words_to_review as $w):
+    $is_due = $w['next_review_at'] > 0 && $w['next_review_at'] <= time();
+    $cls = $w['memory_level'] == 0 ? 'new' : ($is_due ? 'due' : 'ok');
 ?>
-	<div class="word-item <?= $class ?>">
-		<h2><?= htmlspecialchars($word['word']) ?></h2>
-		<p><strong>释义:</strong> <?= nl2br(htmlspecialchars($word['meaning'])) ?></p>
-
-		<div class="review-status">
-			上次学习: <?= format_time($word['last_studied_at']) ?>
-
-			<strong>建议复习:</strong>
-<?php
-	if ($word['next_review_at'] == 0) {
-		echo "立即 (新词)";
-	} elseif ($is_due) {
-		echo "<strong>已过期，请立即复习！</strong>";
-	} else {
-		echo format_time($word['next_review_at']);
-	}
-?>
-			记忆等级: <?= $word['memory_level'] ?> / <?= count($ebbinghaus_intervals) - 1 ?>
-		</div>
-		<form method="POST">
-			<input type="hidden" name="review_id" value="<?= $word['id'] ?>">
-			<button type="submit">我记住了 (进入下一轮)</button>
-		</form>
-	</div>
-<?php endforeach; ?></div>
+    <div class="card <?= $cls ?>">
+        <h3><?= htmlspecialchars($w['word']) ?></h3>
+        <p><strong>释义：</strong><?= nl2br(htmlspecialchars($w['meaning'])) ?></p>
+        <p>
+            上次：<?= format_time($w['last_studied_at']) ?> |
+            下次：<?php
+                if ($w['next_review_at']==0) echo "立即";
+                elseif ($is_due) echo "<b style='color:red'>已到期</b>";
+                else echo format_time($w['next_review_at']);
+            ?> |
+            等级：<?= $w['memory_level'] ?>/8
+        </p>
+        <form method="POST" style="display:inline;">
+            <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
+            <button type="submit">我记住了</button>
+        </form>
+    </div>
+<?php endforeach; endif; ?>
 
 </body>
 </html>
