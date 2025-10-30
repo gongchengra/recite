@@ -1,23 +1,22 @@
 <?php
-// database.php - 带登录验证 + 防暴力破解
+// database.php - 带登录、防暴力破解、last_studied_at 可编辑
 session_start();
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
 error_reporting(E_ALL);
 
 // === 配置 ===
-$auth_file = 'auth.json';           // 管理员密码
-$lockout_file = 'lockout.json';     // 锁定记录
-$max_attempts = 5;                  // 最大失败次数
-$lockout_duration = 15 * 60;        // 锁定15分钟（秒）
+$auth_file = 'auth.json';
+$lockout_file = 'lockout.json';
+$max_attempts = 5;
+$lockout_duration = 15 * 60;
 
 // === 工具函数 ===
 function get_client_ip() {
     $keys = ['HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'];
     foreach ($keys as $key) {
         if (!empty($_SERVER[$key])) {
-            $ip = $_SERVER[$key];
-            $ip = trim(explode(',', $ip)[0]);
+            $ip = trim(explode(',', $_SERVER[$key])[0]);
             if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
         }
     }
@@ -35,14 +34,12 @@ function save_json($file, $data) {
 function is_locked_out($ip, $username) {
     global $lockout_file, $max_attempts, $lockout_duration;
     $lockouts = load_json($lockout_file, []);
-
     $key = "$ip|$username";
     if (isset($lockouts[$key])) {
         $record = $lockouts[$key];
         if ($record['attempts'] >= $max_attempts && (time() - $record['locked_at'] < $lockout_duration)) {
             return $record;
         }
-        // 超时自动解锁
         unset($lockouts[$key]);
         save_json($lockout_file, $lockouts);
     }
@@ -53,11 +50,9 @@ function record_failed_login($ip, $username) {
     global $lockout_file, $max_attempts;
     $lockouts = load_json($lockout_file, []);
     $key = "$ip|$username";
-
     if (!isset($lockouts[$key])) {
         $lockouts[$key] = ['attempts' => 0, 'locked_at' => 0];
     }
-
     $lockouts[$key]['attempts']++;
     if ($lockouts[$key]['attempts'] >= $max_attempts) {
         $lockouts[$key]['locked_at'] = time();
@@ -79,10 +74,8 @@ function show_login_form($error = '') {
     $ip = get_client_ip();
     $username = $_POST['username'] ?? 'admin';
     $lock = is_locked_out($ip, $username);
-
     $remaining = $lock ? ceil(($lock['locked_at'] + $lockout_duration - time()) / 60) : 0;
     $attempts_left = $lock ? 0 : ($max_attempts - ($lock['attempts'] ?? 0));
-
     ?>
     <!DOCTYPE html>
     <html lang="zh">
@@ -106,16 +99,9 @@ function show_login_form($error = '') {
     <body>
     <div class="login-box">
         <h2>管理员登录</h2>
-
-        <?php if ($error): ?>
-            <p class="error"><?= htmlspecialchars($error) ?></p>
-        <?php endif; ?>
-
+        <?php if ($error): ?><p class="error"><?= htmlspecialchars($error) ?></p><?php endif; ?>
         <?php if ($lock): ?>
-            <p class="warning">
-                登录失败过多，已被锁定！<br>
-                请等待 <strong><?= $remaining ?></strong> 分钟后重试。
-            </p>
+            <p class="warning">登录失败过多，已被锁定！<br>请等待 <strong><?= $remaining ?></strong> 分钟。</p>
         <?php else: ?>
             <form method="post">
                 <input type="text" name="username" placeholder="用户名" value="admin" required autofocus>
@@ -128,11 +114,7 @@ function show_login_form($error = '') {
                 <p class="warning">注意：还剩 <?= $attempts_left ?> 次机会，失败将锁定15分钟！</p>
             <?php endif; ?>
         <?php endif; ?>
-
-        <p class="info">
-            默认用户名: <code>admin</code><br>
-            首次使用请设置密码（≥6位）
-        </p>
+        <p class="info">默认用户名: <code>admin</code><br>首次使用请设置密码（≥6位）</p>
     </div>
     </body>
     </html>
@@ -140,25 +122,23 @@ function show_login_form($error = '') {
     exit;
 }
 
-// === 处理登录请求 ===
+// === 处理登录 ===
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     $ip = get_client_ip();
     $username = trim($_POST['username']);
     $password = $_POST['password'];
 
-    if ($username !== 'gongchengra@gmail.com') {
+    if ($username !== 'admin') {
         record_failed_login($ip, $username);
         show_login_form("用户名错误");
     }
 
-    // 检查是否被锁定
     if ($lock = is_locked_out($ip, $username)) {
         show_login_form("账号被锁定，请稍后重试");
     }
 
     $auth_data = load_json($auth_file);
 
-    // 首次设置密码
     if (empty($auth_data)) {
         if (strlen($password) < 6) {
             record_failed_login($ip, $username);
@@ -172,7 +152,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
         exit;
     }
 
-    // 验证密码
     if (password_verify($password, $auth_data['password'])) {
         clear_login_attempts($ip, $username);
         $_SESSION['authenticated'] = true;
@@ -184,19 +163,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['login'])) {
     }
 }
 
-// 处理登出
 if (isset($_GET['logout'])) {
     session_destroy();
     header("Location: " . $_SERVER['PHP_SELF']);
     exit;
 }
 
-// === 登录成功后执行 ===
 if (!isset($_SESSION['authenticated']) || $_SESSION['authenticated'] !== true) {
     show_login_form();
 }
 
-// === 数据库管理界面（从这里开始与之前一致）===
+// === 数据库逻辑 ===
 $db_file = 'words.sqlite';
 if (!file_exists($db_file)) {
     die("数据库文件 $db_file 不存在，请先在 index.php 中添加单词。");
@@ -225,25 +202,48 @@ function format_time($timestamp) {
     return $timestamp == 0 ? "N/A" : date('Y-m-d H:i', $timestamp);
 }
 
-// AJAX 更新
+// === AJAX 更新（含 last_studied_at）===
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update') {
     header('Content-Type: application/json');
     $id = (int)$_POST['id'];
     $memory_level = (int)$_POST['memory_level'];
     $next_review_at = $_POST['next_review_at'] === 'custom' ? strtotime($_POST['custom_time']) : calculate_next_review_time($memory_level);
+    $last_studied_at = $_POST['last_studied_at'] === 'custom' ? strtotime($_POST['custom_last_time']) : ($_POST['last_studied_at'] === 'now' ? time() : null);
 
     if ($_POST['next_review_at'] === 'custom' && $next_review_at === false) {
-        echo json_encode(['success' => false, 'message' => '无效时间']);
+        echo json_encode(['success' => false, 'message' => '无效下次复习时间']);
+        exit;
+    }
+    if ($_POST['last_studied_at'] === 'custom' && $last_studied_at === false) {
+        echo json_encode(['success' => false, 'message' => '无效上次学习时间']);
         exit;
     }
 
     try {
-        $stmt = $db->prepare("UPDATE words SET memory_level = ?, next_review_at = ? WHERE id = ?");
-        $stmt->execute([$memory_level, $next_review_at, $id]);
+        $sql = "UPDATE words SET memory_level = ?, next_review_at = ?";
+        $params = [$memory_level, $next_review_at];
+
+        if ($last_studied_at !== null) {
+            $sql .= ", last_studied_at = ?";
+            $params[] = $last_studied_at;
+        }
+
+        $sql .= " WHERE id = ?";
+        $params[] = $id;
+
+        $stmt = $db->prepare($sql);
+        $stmt->execute($params);
+
+        // 查询更新后的值
+        $stmt = $db->prepare("SELECT last_studied_at, next_review_at, memory_level FROM words WHERE id = ?");
+        $stmt->execute([$id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
         echo json_encode([
             'success' => true,
-            'next_review' => format_time($next_review_at),
-            'memory_level' => $memory_level
+            'last_studied' => format_time($row['last_studied_at']),
+            'next_review' => format_time($row['next_review_at']),
+            'memory_level' => $row['memory_level']
         ]);
     } catch (PDOException $e) {
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
@@ -251,7 +251,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
-// 获取所有单词
+// === 获取所有单词 ===
 try {
     $stmt = $db->query("SELECT * FROM words ORDER BY memory_level ASC");
     $all_words = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -300,7 +300,8 @@ try {
             <th>单词</th>
             <th>释义</th>
             <th>记忆等级 (0-8)</th>
-            <th>下次复习时间</th>
+            <th>上次学习</th>
+            <th>下次复习</th>
             <th>操作</th>
         </tr>
     </thead>
@@ -312,6 +313,15 @@ try {
             <td>
                 <span class="level-display"><?= $w['memory_level'] ?></span>
                 <input type="number" class="level-input" min="0" max="8" value="<?= $w['memory_level'] ?>" style="display:none;">
+            </td>
+            <td>
+                <span class="last-display" data-timestamp="<?= $w['last_studied_at'] ?>"><?= format_time($w['last_studied_at']) ?></span>
+                <select class="last-preset" style="display:none;">
+                    <option value="keep">保持不变</option>
+                    <option value="now">设为现在</option>
+                    <option value="custom">自定义时间</option>
+                </select>
+                <input type="datetime-local" class="last-input" style="display:none; margin-top:5px;">
             </td>
             <td>
                 <span class="time-display" data-timestamp="<?= $w['next_review_at'] ?>"><?= format_time($w['next_review_at']) ?></span>
@@ -333,20 +343,33 @@ try {
 
 <script>
 $(document).ready(function() {
-    let originalLevel, originalTime;
+    let originalLevel, originalLast, originalNext;
 
     $(document).on('click', '.edit-btn', function() {
         const row = $(this).closest('tr');
         row.addClass('editing');
+
         originalLevel = row.find('.level-display').text();
-        originalTime = row.find('.time-display').text();
+        originalLast = row.find('.last-display').text();
+        originalNext = row.find('.time-display').text();
 
-        row.find('.level-display, .time-display, .edit-btn').hide();
-        row.find('.level-input, .time-preset, .save-btn, .cancel-btn').show();
+        row.find('.level-display, .last-display, .time-display, .edit-btn').hide();
+        row.find('.level-input, .last-preset, .time-preset, .save-btn, .cancel-btn').show();
 
-        const ts = row.find('.time-display').data('timestamp') || 0;
-        if (ts > 0) {
-            const d = new Date(ts * 1000);
+        // 设置上次学习时间
+        const lastTs = row.find('.last-display').data('timestamp') || 0;
+        if (lastTs > 0) {
+            const d = new Date(lastTs * 1000);
+            const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+            row.find('.last-input').val(local.toISOString().slice(0, 16));
+        }
+        row.find('.last-preset').val('keep');
+        row.find('.last-input').hide();
+
+        // 设置下次复习时间
+        const nextTs = row.find('.time-display').data('timestamp') || 0;
+        if (nextTs > 0) {
+            const d = new Date(nextTs * 1000);
             const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
             row.find('.time-input').val(local.toISOString().slice(0, 16));
         }
@@ -354,8 +377,14 @@ $(document).ready(function() {
         row.find('.time-input').hide();
     });
 
+    $(document).on('change', '.last-preset', function() {
+        const input = $(this).closest('td').find('.last-input');
+        input.toggle($(this).val() === 'custom');
+    });
+
     $(document).on('change', '.time-preset', function() {
-        $(this).closest('td').find('.time-input').toggle($(this).val() === 'custom');
+        const input = $(this).closest('td').find('.time-input');
+        input.toggle($(this).val() === 'custom');
     });
 
     $(document).on('click', '.cancel-btn', function() {
@@ -363,36 +392,40 @@ $(document).ready(function() {
         row.removeClass('editing');
         row.find('.level-input').val(originalLevel);
         row.find('.level-display').text(originalLevel);
-        row.find('.time-display').text(originalTime);
-        row.find('.level-input, .time-preset, .time-input, .save-btn, .cancel-btn').hide();
-        row.find('.level-display, .time-display, .edit-btn').show();
+        row.find('.last-display').text(originalLast);
+        row.find('.time-display').text(originalNext);
+        row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .save-btn, .cancel-btn').hide();
+        row.find('.level-display, .last-display, .time-display, .edit-btn').show();
     });
 
     $(document).on('click', '.save-btn', function() {
         const row = $(this).closest('tr');
         const id = row.data('id');
         const level = row.find('.level-input').val();
-        const preset = row.find('.time-preset').val();
-        let custom_time = preset === 'custom' ? row.find('.time-input').val() : '';
+        const lastPreset = row.find('.last-preset').val();
+        const nextPreset = row.find('.time-preset').val();
+        const customLast = lastPreset === 'custom' ? row.find('.last-input').val() : '';
+        const customNext = nextPreset === 'custom' ? row.find('.time-input').val() : '';
 
-        if (preset === 'custom' && !custom_time) {
-            alert('请选择自定义时间');
-            return;
-        }
+        if (lastPreset === 'custom' && !customLast) { alert('请选择上次学习时间'); return; }
+        if (nextPreset === 'custom' && !customNext) { alert('请选择下次复习时间'); return; }
 
         $.post('', {
             action: 'update',
             id: id,
             memory_level: level,
-            next_review_at: preset,
-            custom_time: custom_time
+            last_studied_at: lastPreset,
+            custom_last_time: customLast,
+            next_review_at: nextPreset,
+            custom_time: customNext
         }, function(res) {
             if (res.success) {
                 row.find('.level-display').text(res.memory_level);
+                row.find('.last-display').text(res.last_studied);
                 row.find('.time-display').text(res.next_review);
                 row.removeClass('editing');
-                row.find('.level-input, .time-preset, .time-input, .save-btn, .cancel-btn').hide();
-                row.find('.level-display, .time-display, .edit-btn').show();
+                row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .save-btn, .cancel-btn').hide();
+                row.find('.level-display, .last-display, .time-display, .edit-btn').show();
             } else {
                 alert('保存失败: ' + res.message);
             }
