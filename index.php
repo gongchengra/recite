@@ -54,13 +54,22 @@ try {
 
 // ==================== 艾宾浩斯间隔 ====================
 $ebbinghaus_intervals = [
-    0 => 86400, 1 => 172800, 2 => 345600, 3 => 604800,
-    4 => 1296000, 5 => 2592000, 6 => 5184000,
-    7 => 10368000, 8 => 20736000
+	1 => 86400,      // 1天
+	2 => 172800,     // 2天
+	3 => 345600,     // 4天
+	4 => 604800,     // 7天
+	5 => 1296000,    // 15天
+	6 => 2592000,    // 30天
+	7 => 5184000,    // 60天
+	8 => 10368000,   // 120天
+	9 => 20736000    // 240天
 ];
 
 function calculate_next_review_time(int $level): int {
     global $ebbinghaus_intervals;
+	if ($level == 0) {
+		return strtotime('tomorrow'); // 明天复习
+    }
     $level = min($level, count($ebbinghaus_intervals) - 1);
     return time() + $ebbinghaus_intervals[$level];
 }
