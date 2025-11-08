@@ -1,5 +1,5 @@
 <?php
-// database.php - 带登录、防暴力破解、分页、last_studied_at 可编辑
+// database.php - 带登录、防暴力破解、分页、last_studied_at 可编辑 + is_mastered 支持
 session_start();
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -10,7 +10,7 @@ $auth_file = 'auth.json';
 $lockout_file = 'lockout.json';
 $max_attempts = 5;
 $lockout_duration = 15 * 60;
-$per_page = 20;  // 每页50个
+$per_page = 100;
 
 // === 工具函数 ===
 function get_client_ip() {
@@ -183,6 +183,17 @@ if (!file_exists($db_file)) {
 try {
     $db = new PDO("sqlite:$db_file");
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+
+    // 自动添加 is_mastered 字段（兼容旧数据库）
+    try {
+        $db->exec("ALTER TABLE words ADD COLUMN is_mastered INTEGER DEFAULT 0");
+    } catch (PDOException $e) {
+        // 忽略重复列错误
+        if (!str_contains($e->getMessage(), 'duplicate column name')) {
+            throw $e;
+        }
+    }
+
 } catch (PDOException $e) {
     die("数据库连接失败: " . $e->getMessage());
 }
@@ -203,11 +214,12 @@ function format_time($timestamp) {
     return $timestamp == 0 ? "N/A" : date('Y-m-d H:i', $timestamp);
 }
 
-// === AJAX 更新 ===
+// === AJAX 更新（支持 is_mastered）===
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update') {
     header('Content-Type: application/json');
     $id = (int)$_POST['id'];
     $memory_level = (int)$_POST['memory_level'];
+    $is_mastered = isset($_POST['is_mastered']) ? 1 : 0;
     $next_review_at = $_POST['next_review_at'] === 'custom' ? strtotime($_POST['custom_time']) : calculate_next_review_time($memory_level);
     $last_studied_at = $_POST['last_studied_at'] === 'custom' ? strtotime($_POST['custom_last_time']) : ($_POST['last_studied_at'] === 'now' ? time() : null);
 
@@ -221,8 +233,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     }
 
     try {
-        $sql = "UPDATE words SET memory_level = ?, next_review_at = ?";
-        $params = [$memory_level, $next_review_at];
+        $sql = "UPDATE words SET memory_level = ?, next_review_at = ?, is_mastered = ?";
+        $params = [$memory_level, $next_review_at, $is_mastered];
 
         if ($last_studied_at !== null) {
             $sql .= ", last_studied_at = ?";
@@ -235,7 +247,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
         $stmt = $db->prepare($sql);
         $stmt->execute($params);
 
-        $stmt = $db->prepare("SELECT last_studied_at, next_review_at, memory_level FROM words WHERE id = ?");
+        $stmt = $db->prepare("SELECT last_studied_at, next_review_at, memory_level, is_mastered FROM words WHERE id = ?");
         $stmt->execute([$id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -243,7 +255,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             'success' => true,
             'last_studied' => format_time($row['last_studied_at']),
             'next_review' => format_time($row['next_review_at']),
-            'memory_level' => $row['memory_level']
+            'memory_level' => $row['memory_level'],
+            'is_mastered' => $row['is_mastered']
         ]);
     } catch (PDOException $e) {
         echo json_encode(['success' => false, 'message' => $e->getMessage()]);
@@ -262,7 +275,7 @@ $total_pages = max(1, ceil($total_words / $per_page));
 
 // 获取当前页数据
 try {
-    $stmt = $db->prepare("SELECT * FROM words ORDER BY memory_level ASC LIMIT :limit OFFSET :offset");
+    $stmt = $db->prepare("SELECT * FROM words ORDER BY memory_level ASC, word ASC LIMIT :limit OFFSET :offset");
     $stmt->bindValue(':limit', $per_page, PDO::PARAM_INT);
     $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
     $stmt->execute();
@@ -271,7 +284,6 @@ try {
     die("查询失败: " . $e->getMessage());
 }
 
-// 生成分页链接
 function page_url($p) {
     return '?' . http_build_query(array_merge($_GET, ['page' => $p]));
 }
@@ -308,6 +320,8 @@ function page_url($p) {
         .pagination .current { background: #4CAF50; color: white; border-color: #4CAF50; }
         .pagination .disabled { color: #aaa; cursor: not-allowed; }
         .count { color: #ddd; font-size: 0.9em; }
+        .mastered { color: #28a745; font-weight: bold; }
+        .not-mastered { color: #dc3545; }
     </style>
 </head>
 <body>
@@ -328,6 +342,7 @@ function page_url($p) {
             <th>记忆等级 (0-8)</th>
             <th>上次学习</th>
             <th>下次复习</th>
+            <th>已掌握</th>
             <th>操作</th>
         </tr>
     </thead>
@@ -356,6 +371,14 @@ function page_url($p) {
                     <option value="custom">自定义时间</option>
                 </select>
                 <input type="datetime-local" class="time-input" style="display:none; margin-top:5px;">
+            </td>
+            <td>
+                <span class="mastered-display <?= $w['is_mastered'] ? 'mastered' : 'not-mastered' ?>">
+                    <?= $w['is_mastered'] ? '已掌握' : '未掌握' ?>
+                </span>
+                <label style="display:none; white-space:nowrap;">
+                    <input type="checkbox" class="mastered-input" <?= $w['is_mastered'] ? 'checked' : '' ?>> 已完全记住
+                </label>
             </td>
             <td>
                 <button class="edit-btn">修改</button>
@@ -398,7 +421,7 @@ function page_url($p) {
 
 <script>
 $(document).ready(function() {
-    let originalLevel, originalLast, originalNext;
+    let originalLevel, originalLast, originalNext, originalMastered;
 
     $(document).on('click', '.edit-btn', function() {
         const row = $(this).closest('tr');
@@ -407,10 +430,13 @@ $(document).ready(function() {
         originalLevel = row.find('.level-display').text();
         originalLast = row.find('.last-display').text();
         originalNext = row.find('.time-display').text();
+        originalMastered = row.find('.mastered-input').is(':checked') ? 1 : 0;
 
-        row.find('.level-display, .last-display, .time-display, .edit-btn').hide();
-        row.find('.level-input, .last-preset, .time-preset, .save-btn, .cancel-btn').show();
+        row.find('.level-display, .last-display, .time-display, .mastered-display, .edit-btn').hide();
+        row.find('.level-input, .last-preset, .time-preset, .mastered-input, [for], .save-btn, .cancel-btn').show();
+        row.find('.mastered-input').closest('label').show();
 
+        // 初始化时间
         const lastTs = row.find('.last-display').data('timestamp') || 0;
         if (lastTs > 0) {
             const d = new Date(lastTs * 1000);
@@ -445,8 +471,14 @@ $(document).ready(function() {
         row.find('.level-display').text(originalLevel);
         row.find('.last-display').text(originalLast);
         row.find('.time-display').text(originalNext);
-        row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .save-btn, .cancel-btn').hide();
-        row.find('.level-display, .last-display, .time-display, .edit-btn').show();
+        row.find('.mastered-input').prop('checked', originalMastered);
+        row.find('.mastered-display').text(originalMastered ? '已掌握' : '未掌握')
+            .removeClass('mastered not-mastered')
+            .addClass(originalMastered ? 'mastered' : 'not-mastered');
+
+        row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .mastered-input, [for], .save-btn, .cancel-btn').hide();
+        row.find('.level-display, .last-display, .time-display, .mastered-display, .edit-btn').show();
+        row.find('.mastered-input').closest('label').hide();
     });
 
     $(document).on('click', '.save-btn', function() {
@@ -457,6 +489,7 @@ $(document).ready(function() {
         const nextPreset = row.find('.time-preset').val();
         const customLast = lastPreset === 'custom' ? row.find('.last-input').val() : '';
         const customNext = nextPreset === 'custom' ? row.find('.time-input').val() : '';
+        const isMastered = row.find('.mastered-input').is(':checked') ? 1 : 0;
 
         if (lastPreset === 'custom' && !customLast) { alert('请选择上次学习时间'); return; }
         if (nextPreset === 'custom' && !customNext) { alert('请选择下次复习时间'); return; }
@@ -465,6 +498,7 @@ $(document).ready(function() {
             action: 'update',
             id: id,
             memory_level: level,
+            is_mastered: isMastered,
             last_studied_at: lastPreset,
             custom_last_time: customLast,
             next_review_at: nextPreset,
@@ -474,9 +508,14 @@ $(document).ready(function() {
                 row.find('.level-display').text(res.memory_level);
                 row.find('.last-display').text(res.last_studied);
                 row.find('.time-display').text(res.next_review);
+                row.find('.mastered-display').text(res.is_mastered ? '已掌握' : '未掌握')
+                    .removeClass('mastered not-mastered')
+                    .addClass(res.is_mastered ? 'mastered' : 'not-mastered');
+
                 row.removeClass('editing');
-                row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .save-btn, .cancel-btn').hide();
-                row.find('.level-display, .last-display, .time-display, .edit-btn').show();
+                row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .mastered-input, [for], .save-btn, .cancel-btn').hide();
+                row.find('.level-display, .last-display, .time-display, .mastered-display, .edit-btn').show();
+                row.find('.mastered-input').closest('label').hide();
             } else {
                 alert('保存失败: ' + res.message);
             }

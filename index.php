@@ -25,7 +25,8 @@ try {
             meaning TEXT NOT NULL,
             last_studied_at INTEGER DEFAULT 0,
             next_review_at INTEGER DEFAULT 0,
-            memory_level INTEGER DEFAULT 0
+            memory_level INTEGER DEFAULT 0,
+            is_mastered INTEGER DEFAULT 0
         )
     ");
 
@@ -48,27 +49,37 @@ try {
         error_log("清理重复失败: " . $e->getMessage());
     }
 
+    // 安全添加 is_mastered 字段（兼容旧数据库）
+    try {
+        $db->exec("ALTER TABLE words ADD COLUMN is_mastered INTEGER DEFAULT 0");
+    } catch (PDOException $e) {
+        // 忽略“duplicate column name”错误
+        if (!str_contains($e->getMessage(), 'duplicate column name')) {
+            throw $e;
+        }
+    }
+
 } catch (PDOException $e) {
     die("数据库初始化失败: " . $e->getMessage());
 }
 
 // ==================== 艾宾浩斯间隔 ====================
 $ebbinghaus_intervals = [
-	1 => 86400,      // 1天
-	2 => 172800,     // 2天
-	3 => 345600,     // 4天
-	4 => 604800,     // 7天
-	5 => 1296000,    // 15天
-	6 => 2592000,    // 30天
-	7 => 5184000,    // 60天
-	8 => 10368000,   // 120天
-	9 => 20736000    // 240天
+    1 => 86400,      // 1天
+    2 => 172800,     // 2天
+    3 => 345600,     // 4
+    4 => 604800,     // 7
+    5 => 1296000,    // 15
+    6 => 2592000,    // 30
+    7 => 5184000,    // 60
+    8 => 10368000,   // 120
+    9 => 20736000    // 240
 ];
 
 function calculate_next_review_time(int $level): int {
     global $ebbinghaus_intervals;
-	if ($level == 0) {
-		return strtotime('tomorrow'); // 明天复习
+    if ($level == 0) {
+        return strtotime('tomorrow');
     }
     $level = min($level, count($ebbinghaus_intervals) - 1);
     return time() + $ebbinghaus_intervals[$level];
@@ -97,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 'success' => true,
                 'found' => true,
                 'meaning' => $row['meaning'],
-                'message' => "<p style='color:orange'>已找到单词 <strong>$word</strong>，释义已自动填充</p>"
+                'message' => "<p style>已找到单词 <strong>$word</strong>，释义已自动填充</p>"
             ]);
         } else {
             echo json_encode([
@@ -131,8 +142,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['new_word']) && !isset
                 $message = "<p style='color:orange'>单词 <strong>$word</strong> 已更新释义</p>";
             } else {
                 $db->prepare("
-                    INSERT INTO words (word, meaning, last_studied_at, next_review_at, memory_level)
-                    VALUES (?, ?, 0, 0, 0)
+                    INSERT INTO words (word, meaning, last_studied_at, next_review_at, memory_level, is_mastered)
+                    VALUES (?, ?, 0, 0, 0, 0)
                 ")->execute([$word, $meaning]);
                 $message = "<p style='color:green'>添加成功: <strong>$word</strong></p>";
             }
@@ -148,48 +159,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['new_word']) && !isset
     }
 }
 
-// ==================== 复习 ====================
+// ==================== 复习处理（增强版）===================
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['review_id'])) {
     $id = (int)$_POST['review_id'];
+    $action = $_POST['review_action'] ?? 'remembered'; // remembered | forgotten | mastered
     $now = time();
 
     try {
-        $stmt = $db->prepare("SELECT memory_level FROM words WHERE id = ?");
+        $stmt = $db->prepare("SELECT memory_level, is_mastered FROM words WHERE id = ?");
         $stmt->execute([$id]);
-        $level = (int)$stmt->fetchColumn();
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if ($level === false) {
+        if (!$row) {
             $message = "<p style='color:red'>单词不存在</p>";
         } else {
-            $new_level = min($level + 1, count($ebbinghaus_intervals) - 1);
-            $next = calculate_next_review_time($new_level);
+            $current_level = (int)$row['memory_level'];
+            $is_mastered = (int)$row['is_mastered'];
 
-            $db->prepare("
-                UPDATE words
-                SET last_studied_at = ?, next_review_at = ?, memory_level = ?
-                WHERE id = ?
-            ")->execute([$now, $next, $new_level, $id]);
+            if ($action === 'mastered') {
+                // 完全记住
+                $db->prepare("UPDATE words SET is_mastered = 1 WHERE id = ?")
+                   ->execute([$id]);
+                $message = "<p style='color:green'>恭喜！<strong>永久记住</strong>该词</p>";
+            } 
+            elseif ($action === 'forgotten') {
+                // 忘记了 → 重置为新词
+                $next = calculate_next_review_time(0);
+                $db->prepare("
+                    UPDATE words 
+                    SET memory_level = 0, 
+                        last_studied_at = ?, 
+                        next_review_at = ?, 
+                        is_mastered = 0 
+                    WHERE id = ?
+                ")->execute([$now, $next, $id]);
+                $message = "<p style='color:orange'>已重置，下次明天复习</p>";
+            } 
+            else { // remembered
+                if ($is_mastered) {
+                    $message = "<p style='color:gray'>该词已完全记住</p>";
+                } else {
+                    $new_level = min($current_level + 1, count($ebbinghaus_intervals) - 1);
+                    $next = calculate_next_review_time($new_level);
 
-            $message = "<p style='color:green'>复习成功！下次：".date('Y-m-d', $next)."</p>";
+                    $db->prepare("
+                        UPDATE words 
+                        SET last_studied_at = ?, next_review_at = ?, memory_level = ?
+                        WHERE id = ?
+                    ")->execute([$now, $next, $new_level, $id]);
+
+                    $message = "<p style='color:green'>复习成功！下次：".date('Y-m-d', $next)."</p>";
+                }
+            }
         }
     } catch (PDOException $e) {
-        $message = "<p style='color:red'>复习失败</p>";
+        $message = "<p style='color:red'>操作失败</p>";
     }
 }
 
-// ==================== 查询今日单词 ====================
+// ==================== 查询今日单词（排除已掌握）===================
 $today_start = strtotime('today');
 $today_end   = $today_start + 86399;
 
 try {
     $stmt = $db->prepare("
         SELECT * FROM words
-        WHERE next_review_at = 0
-           OR next_review_at BETWEEN ? AND ?
+        WHERE (next_review_at = 0 OR next_review_at < ?)
+          AND (is_mastered IS NULL OR is_mastered = 0)
         ORDER BY next_review_at ASC
-        LIMIT 50
+        LIMIT 100
     ");
-    $stmt->execute([$today_start, $today_end]);
+    $stmt->execute([$today_end]);
     $words_to_review = $stmt->fetchAll(PDO::FETCH_ASSOC);
 } catch (PDOException $e) {
     die("查询失败: " . $e->getMessage());
@@ -199,7 +239,7 @@ function format_time(int $ts): string {
     return $ts == 0 ? "新词" : date('m-d H:i', $ts);
 }
 
-// 获取表单保留值（防止提交后丢失）
+// 获取表单保留值
 $retain_word = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_word'] ?? '') : '';
 $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning'] ?? '') : '';
 ?>
@@ -221,12 +261,16 @@ $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning']
         .due {border-left:5px solid #dc3545;}
         .ok  {border-left:5px solid #28a745;}
         textarea {width:100%; font-family:inherit;}
-        button {padding:8px 16px; cursor:pointer; margin:0 5px;}
+        button {padding:8px 16px; cursor:pointer; margin:0 5px; border:none; border-radius:4px; font-size:0.9em;}
+        .btn-remember {background:#28a745; color:white;}
+        .btn-forgot   {background:#dc3545; color:white;}
+        .btn-mastered {background:#6f42c1; color:white;}
         .input-group {display:flex; gap:5px; align-items:center;}
         .input-group input {flex:1;}
         .search-btn {background:#007bff; color:white; border:none; border-radius:4px; padding:8px 12px; font-size:0.9em;}
         .search-btn:hover {background:#0056b3;}
         .search-btn:disabled {background:#ccc; cursor:not-allowed;}
+        .mastered-tag {color:#28a745; font-weight:bold;}
     </style>
 </head>
 <body>
@@ -268,11 +312,32 @@ $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning']
                 else echo format_time($w['next_review_at']);
             ?> |
             等级：<?= $w['memory_level'] ?>/8
+            <?= $w['is_mastered'] ? ' <span class="mastered-tag">[已掌握]</span>' : '' ?>
         </p>
-        <form method="POST" style="display:inline;">
-            <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
-            <button type="submit">我记住了</button>
-        </form>
+
+        <?php if (!$w['is_mastered']): ?>
+        <div style="margin-top:10px;">
+            <form method="POST" style="display:inline;">
+                <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
+                <input type="hidden" name="review_action" value="remembered">
+                <button type="submit" class="btn-remember">我记住了</button>
+            </form>
+
+            <form method="POST" style="display:inline;">
+                <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
+                <input type="hidden" name="review_action" value="forgotten">
+                <button type="submit" class="btn-forgot">我忘记了</button>
+            </form>
+
+            <form method="POST" style="display:inline;">
+                <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
+                <input type="hidden" name="review_action" value="mastered">
+                <button type="submit" class="btn-mastered">已完全记住</button>
+            </form>
+        </div>
+        <?php else: ?>
+            <p style="color:#28a745; font-weight:bold;">已永久记住，无需复习</p>
+        <?php endif; ?>
     </div>
 <?php endforeach; endif; ?>
 
@@ -314,7 +379,6 @@ $(document).ready(function() {
         });
     });
 
-    // 回车触发搜索
     $wordInput.on('keypress', function(e) {
         if (e.which === 13) {
             e.preventDefault();
@@ -322,7 +386,6 @@ $(document).ready(function() {
         }
     });
 
-    // 显示消息函数
     function showMessage(html) {
         $msgContainer.html('<div class="msg">' + html + '</div>');
         $('html, body').animate({ scrollTop: 0 }, 300);
