@@ -249,6 +249,10 @@ $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning']
 <head>
     <meta charset="UTF-8">
     <title>艾宾浩斯单词本</title>
+	<link rel="icon" type="image/x-icon" href="/favicon.ico">
+	<link rel="icon" type="image/x-icon" href="/16x16.ico">
+	<link rel="icon" type="image/x-icon" href="/32x32.ico">
+	<link rel="icon" type="image/x-icon" href="/48x48.ico">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
         body {font-family: system-ui, sans-serif; padding:20px; max-width:800px; margin:auto;}
