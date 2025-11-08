@@ -53,7 +53,6 @@ try {
     try {
         $db->exec("ALTER TABLE words ADD COLUMN is_mastered INTEGER DEFAULT 0");
     } catch (PDOException $e) {
-        // 忽略“duplicate column name”错误
         if (!str_contains($e->getMessage(), 'duplicate column name')) {
             throw $e;
         }
@@ -177,13 +176,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['review_id'])) {
             $is_mastered = (int)$row['is_mastered'];
 
             if ($action === 'mastered') {
-                // 完全记住
                 $db->prepare("UPDATE words SET is_mastered = 1 WHERE id = ?")
                    ->execute([$id]);
                 $message = "<p style='color:green'>恭喜！<strong>永久记住</strong>该词</p>";
             } 
             elseif ($action === 'forgotten') {
-                // 忘记了 → 重置为新词
                 $next = calculate_next_review_time(0);
                 $db->prepare("
                     UPDATE words 
@@ -249,10 +246,10 @@ $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning']
 <head>
     <meta charset="UTF-8">
     <title>艾宾浩斯单词本</title>
-	<link rel="icon" type="image/x-icon" href="/favicon.ico">
-	<link rel="icon" type="image/x-icon" href="/16x16.ico">
-	<link rel="icon" type="image/x-icon" href="/32x32.ico">
-	<link rel="icon" type="image/x-icon" href="/48x48.ico">
+    <link rel="icon" type="image/x-icon" href="/favicon.ico">
+    <link rel="icon" type="image/x-icon" href="/16x16.ico">
+    <link rel="icon" type="image/x-icon" href="/32x32.ico">
+    <link rel="icon" type="image/x-icon" href="/48x48.ico">
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <style>
         body {font-family: system-ui, sans-serif; padding:20px; max-width:800px; margin:auto;}
@@ -260,7 +257,7 @@ $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning']
         .success {background:#d4edda; color:#155724;}
         .warning {background:#fff3cd; color:#856404;}
         .error   {background:#f8d7da; color:#721c24;}
-        .card {border:1px solid #ddd; padding:15px; margin:10px 0; border-radius:6px;}
+        .card {border:1px solid #ddd; padding:15px; margin:10px 0; border-radius:6px; position:relative;}
         .new {border-left:5px solid #007bff;}
         .due {border-left:5px solid #dc3545;}
         .ok  {border-left:5px solid #28a745;}
@@ -275,6 +272,28 @@ $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning']
         .search-btn:hover {background:#0056b3;}
         .search-btn:disabled {background:#ccc; cursor:not-allowed;}
         .mastered-tag {color:#28a745; font-weight:bold;}
+
+        /* ==== 新增：三个点按钮 & 下拉菜单 ==== */
+        .card-menu-btn {
+            position: absolute; top:8px; right:8px;
+            background:none; border:none; font-size:1.4em; cursor:pointer;
+            color:#666;
+        }
+        .card-menu-btn:hover {color:#000;}
+        .card-menu {
+            position: absolute; top:32px; right:0;
+            background:#fff; border:1px solid #ddd; border-radius:4px;
+            box-shadow:0 2px 8px rgba(0,0,0,.15);
+            min-width:140px; z-index:10;
+            display:none;
+        }
+        .card-menu.show {display:block;}
+        .card-menu button {
+            display:block; width:100%; text-align:left;
+            margin:0; border-radius:0; font-size:0.85em;
+        }
+        .card-menu button:first-child {border-top-left-radius:4px; border-top-right-radius:4px;}
+        .card-menu button:last-child {border-bottom-left-radius:4px; border-bottom-right-radius:4px;}
     </style>
 </head>
 <body>
@@ -306,6 +325,8 @@ $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning']
     $cls = $w['memory_level'] == 0 ? 'new' : ($is_due ? 'due' : 'ok');
 ?>
     <div class="card <?= $cls ?>">
+        <button type="button" class="card-menu-btn" aria-label="更多操作">...</button>
+
         <h3><?= htmlspecialchars($w['word']) ?></h3>
         <p><strong>释义：</strong><?= nl2br(htmlspecialchars($w['meaning'])) ?></p>
         <p>
@@ -321,19 +342,24 @@ $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning']
 
         <?php if (!$w['is_mastered']): ?>
         <div style="margin-top:10px;">
+            <!-- 记住按钮始终可见 -->
             <form method="POST" style="display:inline;">
                 <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
                 <input type="hidden" name="review_action" value="remembered">
                 <button type="submit" class="btn-remember">我记住了</button>
             </form>
 
-            <form method="POST" style="display:inline;">
+            <!-- 其它两个按钮放入下拉菜单 -->
+        </div>
+
+        <!-- 下拉菜单 -->
+        <div class="card-menu" id="menu-<?= $w['id'] ?>">
+            <form method="POST" style="margin:0;">
                 <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
                 <input type="hidden" name="review_action" value="forgotten">
                 <button type="submit" class="btn-forgot">我忘记了</button>
             </form>
-
-            <form method="POST" style="display:inline;">
+            <form method="POST" style="margin:0;">
                 <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
                 <input type="hidden" name="review_action" value="mastered">
                 <button type="submit" class="btn-mastered">已完全记住</button>
@@ -352,19 +378,15 @@ $(document).ready(function() {
     const $meaningInput = $('#new_meaning');
     const $searchBtn = $('#searchBtn');
 
+    /* ---------- 搜索功能 ---------- */
     $searchBtn.on('click', function() {
         const word = $wordInput.val().trim();
         if (!word) {
             showMessage('<p style="color:red;">请输入单词</p>');
             return;
         }
-
         $searchBtn.prop('disabled', true).text('搜索中...');
-
-        $.post('', {
-            action: 'search',
-            word: word
-        }, function(res) {
+        $.post('', {action: 'search', word: word}, function(res) {
             if (res.success) {
                 if (res.found) {
                     $meaningInput.val(res.meaning);
@@ -382,11 +404,23 @@ $(document).ready(function() {
             $searchBtn.prop('disabled', false).text('搜索');
         });
     });
-
     $wordInput.on('keypress', function(e) {
-        if (e.which === 13) {
-            e.preventDefault();
-            $searchBtn.click();
+        if (e.which === 13) { e.preventDefault(); $searchBtn.click(); }
+    });
+
+    /* ---------- 三个点菜单 ---------- */
+    $('.card-menu-btn').on('click', function(e) {
+        e.stopPropagation();
+        const $menu = $(this).nextAll('.card-menu').first();
+        // 关闭其它打开的菜单
+        $('.card-menu.show').not($menu).removeClass('show');
+        $menu.toggleClass('show');
+    });
+
+    // 点击页面其它地方关闭所有菜单
+    $(document).on('click', function(e) {
+        if (!$(e.target).closest('.card').length) {
+            $('.card-menu.show').removeClass('show');
         }
     });
 
