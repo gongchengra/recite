@@ -1,5 +1,5 @@
 <?php
-// database.php - 带登录、防暴力破解、分页、last_studied_at 可编辑 + is_mastered 支持
+// database.php - 带登录、防暴力破解、分页、last_studied_at 可编辑 + is_mastered 支持（已修复）
 session_start();
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -102,7 +102,7 @@ function show_login_form($error = '') {
         <h2>管理员登录</h2>
         <?php if ($error): ?><p class="error"><?= htmlspecialchars($error) ?></p><?php endif; ?>
         <?php if ($lock): ?>
-            <p class="warning">登录失败过多，已被锁定！<br>请等待 <strong><?= $remaining ?></strong> 分钟。</p>
+            <p class="warning">登录失败过多，已被定！<br>请等待 <strong><?= $remaining ?></strong> 分钟。</p>
         <?php else: ?>
             <form method="post">
                 <input type="text" name="username" placeholder="用户名" value="admin" required autofocus>
@@ -188,7 +188,6 @@ try {
     try {
         $db->exec("ALTER TABLE words ADD COLUMN is_mastered INTEGER DEFAULT 0");
     } catch (PDOException $e) {
-        // 忽略重复列错误
         if (!str_contains($e->getMessage(), 'duplicate column name')) {
             throw $e;
         }
@@ -214,12 +213,12 @@ function format_time($timestamp) {
     return $timestamp == 0 ? "N/A" : date('Y-m-d H:i', $timestamp);
 }
 
-// === AJAX 更新（支持 is_mastered）===
+// === AJAX 更新（已修复 is_mastered）===
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update') {
     header('Content-Type: application/json');
     $id = (int)$_POST['id'];
     $memory_level = (int)$_POST['memory_level'];
-    $is_mastered = isset($_POST['is_mastered']) ? 1 : 0;
+    $is_mastered = isset($_POST['is_mastered']) ? (int)$_POST['is_mastered'] : 0; // 明确接收 0 或 1
     $next_review_at = $_POST['next_review_at'] === 'custom' ? strtotime($_POST['custom_time']) : calculate_next_review_time($memory_level);
     $last_studied_at = $_POST['last_studied_at'] === 'custom' ? strtotime($_POST['custom_last_time']) : ($_POST['last_studied_at'] === 'now' ? time() : null);
 
@@ -433,7 +432,7 @@ $(document).ready(function() {
         originalMastered = row.find('.mastered-input').is(':checked') ? 1 : 0;
 
         row.find('.level-display, .last-display, .time-display, .mastered-display, .edit-btn').hide();
-        row.find('.level-input, .last-preset, .time-preset, .mastered-input, [for], .save-btn, .cancel-btn').show();
+        row.find('.level-input, .last-preset, .time-preset, .mastered-input, .save-btn, .cancel-btn').show();
         row.find('.mastered-input').closest('label').show();
 
         // 初始化时间
@@ -476,7 +475,7 @@ $(document).ready(function() {
             .removeClass('mastered not-mastered')
             .addClass(originalMastered ? 'mastered' : 'not-mastered');
 
-        row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .mastered-input, [for], .save-btn, .cancel-btn').hide();
+        row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .mastered-input, .save-btn, .cancel-btn').hide();
         row.find('.level-display, .last-display, .time-display, .mastered-display, .edit-btn').show();
         row.find('.mastered-input').closest('label').hide();
     });
@@ -494,32 +493,39 @@ $(document).ready(function() {
         if (lastPreset === 'custom' && !customLast) { alert('请选择上次学习时间'); return; }
         if (nextPreset === 'custom' && !customNext) { alert('请选择下次复习时间'); return; }
 
-        $.post('', {
+        const postData = {
             action: 'update',
             id: id,
             memory_level: level,
-            is_mastered: isMastered,
+            is_mastered: isMastered,  // 明确发送 0 或 1
             last_studied_at: lastPreset,
-            custom_last_time: customLast,
-            next_review_at: nextPreset,
-            custom_time: customNext
-        }, function(res) {
+            next_review_at: nextPreset
+        };
+        if (lastPreset === 'custom') postData.custom_last_time = customLast;
+        if (nextPreset === 'custom') postData.custom_time = customNext;
+
+        $.post('', postData, function(res) {
             if (res.success) {
+                // 更新显示
                 row.find('.level-display').text(res.memory_level);
                 row.find('.last-display').text(res.last_studied);
                 row.find('.time-display').text(res.next_review);
-                row.find('.mastered-display').text(res.is_mastered ? '已掌握' : '未掌握')
+                row.find('.mastered-display')
+                    .text(res.is_mastered ? '已掌握' : '未掌握')
                     .removeClass('mastered not-mastered')
                     .addClass(res.is_mastered ? 'mastered' : 'not-mastered');
 
+                // 退出编辑模式
                 row.removeClass('editing');
-                row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .mastered-input, [for], .save-btn, .cancel-btn').hide();
+                row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .mastered-input, .save-btn, .cancel-btn').hide();
                 row.find('.level-display, .last-display, .time-display, .mastered-display, .edit-btn').show();
                 row.find('.mastered-input').closest('label').hide();
             } else {
-                alert('保存失败: ' + res.message);
+                alert('保存失败: ' + (res.message || '未知错误'));
             }
-        }, 'json');
+        }, 'json').fail(function() {
+            alert('网络错误，请重试');
+        });
     });
 });
 </script>
