@@ -229,7 +229,7 @@ try {
 	$stmt->execute([$today_end]);
 	$words_to_review = $stmt->fetchAll(PDO::FETCH_ASSOC);
 	$review_count = count($words_to_review);
-	$seconds_total = $review_count * 10;                // 每词 10 秒
+	$seconds_total = $review_count * 5;                // 每词 10 秒
 	$minutes = floor($seconds_total / 60);
 	$seconds = $seconds_total % 60;
 	$estimated_time = $minutes > 0
@@ -331,7 +331,7 @@ $retain_meaning = $_SERVER['REQUEST_METHOD'] === 'POST' ? ($_POST['new_meaning']
 	<!-- 新增的统计行 -->
 	<div style="background:#e7f3ff; padding:15px; margin:20px 0; border-radius:8px; font-size:1.1em; font-weight:bold; text-align:center;">
 		今日待复习：<span style="color:#d63939;"><?= $review_count ?></span> 个单词　　
-		预计用时约：<span style="color:#0066cc;"><?= $estimated_time ?></span>（每词 10 秒）
+		预计用时约：<span style="color:#0066cc;"><?= $estimated_time ?></span>（每词 5 秒）
 	</div>
 	<?php foreach ($words_to_review as $w):
 	$is_due = $w['next_review_at'] > 0 && $w['next_review_at'] <= time();
