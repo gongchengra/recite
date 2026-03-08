@@ -1,5 +1,5 @@
 <?php
-// database.php - 带登录、防暴力破解、分页、last_studied_at 可编辑 + is_mastered 支持（已修复）
+// database.php - 带登录、防暴力破解、分页、last_studied_at 可编辑 + is_mastered 支持 + 搜索置顶功能
 session_start();
 ini_set('display_errors', 1);
 ini_set('display_startup_errors', 1);
@@ -102,7 +102,7 @@ function show_login_form($error = '') {
         <h2>管理员登录</h2>
         <?php if ($error): ?><p class="error"><?= htmlspecialchars($error) ?></p><?php endif; ?>
         <?php if ($lock): ?>
-            <p class="warning">登录失败过多，已被定！<br>请等待 <strong><?= $remaining ?></strong> 分钟。</p>
+            <p class="warning">登录失败过多，被锁定！<br>请等待 <strong><?= $remaining ?></strong> 分钟。</p>
         <?php else: ?>
             <form method="post">
                 <input type="text" name="username" placeholder="用户名" value="admin" required autofocus>
@@ -184,7 +184,7 @@ try {
     $db = new PDO("sqlite:$db_file");
     $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
-    // 自动添加 is_mastered 字段（兼容旧数据库）
+    // 自动添加 is_mastered 字段
     try {
         $db->exec("ALTER TABLE words ADD COLUMN is_mastered INTEGER DEFAULT 0");
     } catch (PDOException $e) {
@@ -192,7 +192,6 @@ try {
             throw $e;
         }
     }
-
 } catch (PDOException $e) {
     die("数据库连接失败: " . $e->getMessage());
 }
@@ -213,12 +212,12 @@ function format_time($timestamp) {
     return $timestamp == 0 ? "N/A" : date('Y-m-d H:i', $timestamp);
 }
 
-// === AJAX 更新（已修复 is_mastered）===
+// === AJAX 更新 ===
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'update') {
     header('Content-Type: application/json');
     $id = (int)$_POST['id'];
     $memory_level = (int)$_POST['memory_level'];
-    $is_mastered = isset($_POST['is_mastered']) ? (int)$_POST['is_mastered'] : 0; // 明确接收 0 或 1
+    $is_mastered = isset($_POST['is_mastered']) ? (int)$_POST['is_mastered'] : 0;
     $next_review_at = $_POST['next_review_at'] === 'custom' ? strtotime($_POST['custom_time']) : calculate_next_review_time($memory_level);
     $last_studied_at = $_POST['last_studied_at'] === 'custom' ? strtotime($_POST['custom_last_time']) : ($_POST['last_studied_at'] === 'now' ? time() : null);
 
@@ -263,16 +262,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     exit;
 }
 
+// === 搜索单词并返回该行 HTML ===
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['action']) && $_GET['action'] === 'search') {
+    header('Content-Type: application/json');
+    
+    $search_word = trim($_GET['word'] ?? '');
+    if (!$search_word) {
+        echo json_encode(['success' => false, 'message' => '未输入单词']);
+        exit;
+    }
+
+    try {
+        $stmt = $db->prepare("SELECT * FROM words WHERE word = ? COLLATE NOCASE LIMIT 1");
+        $stmt->execute([$search_word]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$row) {
+            echo json_encode(['success' => false, 'message' => '未找到单词']);
+            exit;
+        }
+
+        ob_start();
+        ?>
+        <tr data-id="<?= $row['id'] ?>">
+            <td><strong><?= htmlspecialchars($row['word']) ?></strong></td>
+            <td style="max-width:300px; word-wrap:break-word;"><?= nl2br(htmlspecialchars($row['meaning'])) ?></td>
+            <td>
+                <span class="level-display"><?= $row['memory_level'] ?></span>
+                <input type="number" class="level-input" min="0" max="8" value="<?= $row['memory_level'] ?>" style="display:none;">
+            </td>
+            <td>
+                <span class="last-display" data-timestamp="<?= $row['last_studied_at'] ?>"><?= format_time($row['last_studied_at']) ?></span>
+                <select class="last-preset" style="display:none;">
+                    <option value="keep">保持不变</option>
+                    <option value="now">设为现在</option>
+                    <option value="custom">自定义时间</option>
+                </select>
+                <input type="datetime-local" class="last-input" style="display:none; margin-top:5px;">
+            </td>
+            <td>
+                <span class="time-display" data-timestamp="<?= $row['next_review_at'] ?>"><?= format_time($row['next_review_at']) ?></span>
+                <select class="time-preset" style="display:none;">
+                    <option value="auto">自动计算</option>
+                    <option value="custom">自定义时间</option>
+                </select>
+                <input type="datetime-local" class="time-input" style="display:none; margin-top:5px;">
+            </td>
+            <td>
+                <span class="mastered-display <?= $row['is_mastered'] ? 'mastered' : 'not-mastered' ?>">
+                    <?= $row['is_mastered'] ? '已掌握' : '未掌握' ?>
+                </span>
+                <label style="display:none; white-space:nowrap;">
+                    <input type="checkbox" class="mastered-input" <?= $row['is_mastered'] ? 'checked' : '' ?>> 已完全记住
+                </label>
+            </td>
+            <td>
+                <button class="edit-btn">修改</button>
+                <button class="save-btn" style="display:none;">保存</button>
+                <button class="cancel-btn" style="display:none;">取消</button>
+            </td>
+        </tr>
+        <?php
+        $html = ob_get_clean();
+
+        echo json_encode([
+            'success' => true,
+            'id'   => $row['id'],
+            'html' => $html
+        ]);
+    } catch (Exception $e) {
+        echo json_encode(['success' => false, 'message' => $e->getMessage()]);
+    }
+    exit;
+}
+
 // === 分页逻辑 ===
 $page = max(1, (int)($_GET['page'] ?? 1));
 $offset = ($page - 1) * $per_page;
 
-// 获取总数
 $total_stmt = $db->query("SELECT COUNT(*) FROM words");
 $total_words = $total_stmt->fetchColumn();
 $total_pages = max(1, ceil($total_words / $per_page));
 
-// 获取当前页数据
 try {
     $stmt = $db->prepare("SELECT * FROM words ORDER BY memory_level ASC, word ASC LIMIT :limit OFFSET :offset");
     $stmt->bindValue(':limit', $per_page, PDO::PARAM_INT);
@@ -327,7 +398,12 @@ function page_url($p) {
 
 <div class="header">
     <h1>单词数据库管理</h1>
-    <div>
+    <div style="display:flex; align-items:center; gap:12px;">
+        <input type="text" id="searchWord" placeholder="输入单词后回车或点击搜索" 
+               style="padding:8px 12px; width:240px; border-radius:4px; border:1px solid #ddd; font-size:14px;">
+        <button id="searchBtn" style="padding:8px 16px; background:#2196F3; color:white; border:none; border-radius:4px; cursor:pointer; font-size:14px;">
+            搜索并置
+        </button>
         <span class="count">共 <?= $total_words ?> 个单词 | 第 <?= $page ?> / <?= $total_pages ?> 页</span> |
         <a href="?logout=1">登出</a>
     </div>
@@ -420,6 +496,53 @@ function page_url($p) {
 
 <script>
 $(document).ready(function() {
+
+    // ===================== 搜索功能 =====================
+    function doSearch() {
+        const word = $('#searchWord').val().trim();
+        console.log("搜索被触发，单词：", word);  // ← 调试用
+
+        if (!word) {
+            alert('请输入要搜索的单词');
+            return;
+        }
+
+        $.get('', { action: 'search', word: word }, function(res) {
+            console.log("搜索返回：", res);  // ← 调试用，看返回内容
+
+            if (res.success && res.html) {
+                // 移除已有相同 id 的行（避免重复）
+                $('tr[data-id="' + res.id + '"]').remove();
+
+                // 插入到最前面
+                $('#wordsTable tbody').prepend(res.html);
+
+                // 高亮新行
+                const newRow = $('#wordsTable tbody tr:first');
+                newRow.css('background', '#fff3cd');
+                setTimeout(() => newRow.css('background', ''), 1800);
+
+                $('#searchWord').val('').focus();
+            } else {
+                alert('未找到单词：' + word + (res.message ? ' (' + res.message + ')' : ''));
+            }
+        }, 'json')
+        .fail(function(jqXHR, textStatus, errorThrown) {
+            console.error("搜索 AJAX 失败：", textStatus, errorThrown, jqXHR.responseText);
+            alert('搜索失败，请按 F12 开控制台查看详细错误');
+        });
+    }
+
+    $('#searchBtn').on('click', doSearch);
+
+    $('#searchWord').on('keypress', function(e) {
+        if (e.which === 13) {
+            e.preventDefault();  // 防止回车提交表单导致页面刷新
+            doSearch();
+        }
+    });
+
+    // ===================== 原有编辑/保存功能 =====================
     let originalLevel, originalLast, originalNext, originalMastered;
 
     $(document).on('click', '.edit-btn', function() {
@@ -435,7 +558,6 @@ $(document).ready(function() {
         row.find('.level-input, .last-preset, .time-preset, .mastered-input, .save-btn, .cancel-btn').show();
         row.find('.mastered-input').closest('label').show();
 
-        // 初始化时间
         const lastTs = row.find('.last-display').data('timestamp') || 0;
         if (lastTs > 0) {
             const d = new Date(lastTs * 1000);
@@ -497,7 +619,7 @@ $(document).ready(function() {
             action: 'update',
             id: id,
             memory_level: level,
-            is_mastered: isMastered,  // 明确发送 0 或 1
+            is_mastered: isMastered,
             last_studied_at: lastPreset,
             next_review_at: nextPreset
         };
@@ -506,7 +628,6 @@ $(document).ready(function() {
 
         $.post('', postData, function(res) {
             if (res.success) {
-                // 更新显示
                 row.find('.level-display').text(res.memory_level);
                 row.find('.last-display').text(res.last_studied);
                 row.find('.time-display').text(res.next_review);
@@ -515,7 +636,6 @@ $(document).ready(function() {
                     .removeClass('mastered not-mastered')
                     .addClass(res.is_mastered ? 'mastered' : 'not-mastered');
 
-                // 退出编辑模式
                 row.removeClass('editing');
                 row.find('.level-input, .last-preset, .last-input, .time-preset, .time-input, .mastered-input, .save-btn, .cancel-btn').hide();
                 row.find('.level-display, .last-display, .time-display, .mastered-display, .edit-btn').show();
@@ -527,6 +647,7 @@ $(document).ready(function() {
             alert('网络错误，请重试');
         });
     });
+
 });
 </script>
 
