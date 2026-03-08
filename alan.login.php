@@ -138,6 +138,11 @@ if (isset($_GET['logout'])) {
     exit;
 }
 
+// 首页手动点击登录的情况
+if (basename($_SERVER['PHP_SELF']) === 'alan.login.php' && empty($_SESSION['alan_auth'])) {
+    show_login();
+}
+
 // 必须登录（仅在需要保护的页面调用）
 function check_login(): void {
     if (empty($_SESSION['alan_auth'])) {
