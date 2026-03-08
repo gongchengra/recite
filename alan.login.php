@@ -1,76 +1,51 @@
 <?php
 // alan.login.php
 declare(strict_types=1);
-session_start();
 
 require_once __DIR__ . '/alan.func.php';
 
 ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
-// ==================== 配置 ====================
-$auth_file        = __DIR__ . '/alan_auth.json';
-$lockout_file     = __DIR__ . '/alan_lockout.json';
-$max_attempts     = 5;
-$lockout_duration = 15 * 60;   // 15 分钟
-
-// ==================== 工具函数 ====================
-function get_client_ip(): string {
-    $keys = ['HTTP_CLIENT_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR'];
-    foreach ($keys as $k) {
-        if (!empty($_SERVER[$k])) {
-            $ip = trim(explode(',', $_SERVER[$k])[0]);
-            if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
-        }
-    }
-    return 'unknown';
-}
-
-function load_json(string $file, array $def = []): array {
-    return file_exists($file) ? json_decode(file_get_contents($file), true) ?: $def : $def;
-}
-function save_json(string $file, array $data): void {
-    file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT));
-}
-
+// ==================== 登录逻辑 ====================
 // 防暴力破解
 function is_locked_out(string $ip, string $user): array|false {
-    global $lockout_file, $max_attempts, $lockout_duration;
-    $data = load_json($lockout_file);
+    $config = $GLOBALS['config'];
+    $data = load_json($config['lockout_file']);
     $key  = "$ip|$user";
     if (isset($data[$key])) {
         $r = $data[$key];
-        if ($r['attempts'] >= $max_attempts && (time() - $r['locked_at'] < $lockout_duration)) {
+        if ($r['attempts'] >= $config['max_attempts'] && (time() - $r['locked_at'] < $config['lockout_duration'])) {
             return $r;
         }
         unset($data[$key]);
-        save_json($lockout_file, $data);
+        save_json($config['lockout_file'], $data);
     }
     return false;
 }
 function record_failed(string $ip, string $user): void {
-    global $lockout_file, $max_attempts;
-    $data = load_json($lockout_file);
+    $config = $GLOBALS['config'];
+    $data = load_json($config['lockout_file']);
     $key  = "$ip|$user";
     $data[$key]['attempts'] = ($data[$key]['attempts'] ?? 0) + 1;
-    if ($data[$key]['attempts'] >= $max_attempts) $data[$key]['locked_at'] = time();
-    save_json($lockout_file, $data);
+    if ($data[$key]['attempts'] >= $config['max_attempts']) $data[$key]['locked_at'] = time();
+    save_json($config['lockout_file'], $data);
 }
 function clear_attempts(string $ip, string $user): void {
-    global $lockout_file;
-    $data = load_json($lockout_file);
+    $config = $GLOBALS['config'];
+    $data = load_json($config['lockout_file']);
     unset($data["$ip|$user"]);
-    save_json($lockout_file, $data);
+    save_json($config['lockout_file'], $data);
 }
 
 // ==================== 登录表单 ====================
 function show_login(string $error = ''): void {
-    global $max_attempts, $lockout_duration;
+    $config = $GLOBALS['config'];
     $ip   = get_client_ip();
     $user = $_POST['username'] ?? 'admin';
     $lock = is_locked_out($ip, $user);
-    $remain = $lock ? ceil(($lock['locked_at'] + $lockout_duration - time()) / 60) : 0;
-    $left   = $lock ? 0 : $max_attempts - ($lock['attempts'] ?? 0);
+    $remain = $lock ? ceil(($lock['locked_at'] + $config['lockout_duration'] - time()) / 60) : 0;
+    $left   = $lock ? 0 : $config['max_attempts'] - ($lock['attempts'] ?? 0);
     ?>
     <!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><title>Alan - 登录</title>
     <style>
@@ -109,6 +84,7 @@ function show_login(string $error = ''): void {
 
 // ==================== 处理登录 ====================
 if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['login'])) {
+    $config = $GLOBALS['config'];
     $ip   = get_client_ip();
     $user = trim($_POST['username'] ?? '');
     $pass = $_POST['password'] ?? '';
@@ -123,14 +99,14 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['login'])) {
         show_login('账号被锁定，请稍后重试');
     }
 
-    $auth = load_json($auth_file);
+    $auth = load_json($config['auth_file']);
     if (empty($auth)) {               // 首次设置密码
         if (strlen($pass) < 6) {
             record_failed($ip, $user);
             show_login('密码至少 6 位');
         }
         $hash = password_hash($pass, PASSWORD_DEFAULT);
-        save_json($auth_file, ['username'=>'admin','password'=>$hash]);
+        save_json($config['auth_file'], ['username'=>'admin','password'=>$hash]);
         clear_attempts($ip, $user);
         $_SESSION['alan_auth'] = true;
         header('Location: alan.php');
