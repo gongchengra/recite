@@ -89,49 +89,58 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['login'])) {
     $user = trim($_POST['username'] ?? '');
     $pass = $_POST['password'] ?? '';
 
-    // 固定管理员用户名（可自行修改）
-    if ($user !== 'gongchengra@gmail.com') {
-        record_failed($ip, $user);
-        show_login('用户名错误');
-    }
-
     if (is_locked_out($ip, $user)) {
         show_login('账号被锁定，请稍后重试');
     }
 
-    $auth = load_json($config['auth_file']);
-    if (empty($auth)) {               // 首次设置密码
+    $all_auth = load_json($config['auth_file']); // 格式: {"user1": {"password": "hash", "db_file": "..."}, "user2": ...}
+
+    // 处理首次设置（如果是空文件）
+    if (empty($all_auth)) {
         if (strlen($pass) < 6) {
             record_failed($ip, $user);
             show_login('密码至少 6 位');
         }
         $hash = password_hash($pass, PASSWORD_DEFAULT);
-        save_json($config['auth_file'], ['username'=>'admin','password'=>$hash]);
+        $new_auth = [
+            $user => [
+                'password' => $hash,
+                'db_file'  => ALAN_ROOT . '/words.sqlite' // 默认第一个用户的数据库
+            ]
+        ];
+        save_json($config['auth_file'], $new_auth);
         clear_attempts($ip, $user);
         $_SESSION['alan_auth'] = true;
-        header('Location: alan.php');
+        $_SESSION['alan_user'] = $user;
+        $_SESSION['alan_db']   = $new_auth[$user]['db_file'];
+        header('Location: index.php');
         exit;
     }
 
-    if (password_verify($pass, $auth['password'])) {
+    // 校验用户是否存在并验证密码
+    if (isset($all_auth[$user]) && password_verify($pass, $all_auth[$user]['password'])) {
         clear_attempts($ip, $user);
         $_SESSION['alan_auth'] = true;
-        header('Location: alan.php');
+        $_SESSION['alan_user'] = $user;
+        $_SESSION['alan_db']   = $all_auth[$user]['db_file'] ?? (ALAN_ROOT . '/words.sqlite');
+        header('Location: index.php');
         exit;
     } else {
         record_failed($ip, $user);
-        show_login('密码错误');
+        show_login('用户名或密码错误');
     }
 }
 
 // 退出
 if (isset($_GET['logout'])) {
     session_destroy();
-    header('Location: alan.php');
+    header('Location: index.php');
     exit;
 }
 
-// 必须登录
-if (empty($_SESSION['alan_auth'])) {
-    show_login();
+// 必须登录（仅在需要保护的页面调用）
+function check_login(): void {
+    if (empty($_SESSION['alan_auth'])) {
+        show_login();
+    }
 }

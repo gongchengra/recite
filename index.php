@@ -2,6 +2,7 @@
 // index.php - 艾宾浩斯单词复习主界面
 declare(strict_types=1);
 
+require_once __DIR__ . '/alan.login.php';   // 登录与权限校验
 require_once __DIR__ . '/alan.func.php';    // 公共函数与业务逻辑
 
 $db = alan_db();
@@ -65,8 +66,19 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
 <body>
 
 <div class="nav-links">
-    <a href="database.php">后台管理</a>
-    <a href="test.php">掌握测试</a>
+    <div>
+        <a href="database.php">后台管理</a> | 
+        <a href="test.php">掌握测试</a>
+    </div>
+    <div style="color:#999;">
+        <?php if (!empty($_SESSION['alan_auth'])): ?>
+            用户: <span style="color:#333;font-weight:bold;"><?=h($_SESSION['alan_user'])?></span> | 
+            <a href="?logout=1" style="color:#dc3545;">退出登录</a>
+        <?php else: ?>
+            <span style="color:#666;">游客模式 (words.sqlite)</span> | 
+            <a href="alan.login.php" style="color:#007bff;font-weight:bold;">登录/切换用户</a>
+        <?php endif; ?>
+    </div>
 </div>
 
 <h1>Alan 单词复习</h1>

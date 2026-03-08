@@ -34,7 +34,8 @@ $GLOBALS['config'] = [
 function alan_db(): PDO {
     static $db = null;
     if ($db === null) {
-        $file = $GLOBALS['config']['db_file'];
+        // 优先使用 Session 中指定的数据库文件，实现多用户切换
+        $file = $_SESSION['alan_db'] ?? $GLOBALS['config']['db_file'];
 
         // 确保数据库文件和目录可写
         if (file_exists($file) && !is_writable($file)) {

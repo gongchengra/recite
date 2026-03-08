@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/alan.login.php';   // 登录校验
+check_login();                             // 强制管理后台登录
 require_once __DIR__ . '/alan.func.php';    // 公共函数
 
 $db = alan_db();
