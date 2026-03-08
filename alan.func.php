@@ -35,7 +35,7 @@ function alan_db(): PDO {
     static $db = null;
     if ($db === null) {
         $file = $GLOBALS['config']['db_file'];
-        
+
         // 确保数据库文件和目录可写
         if (file_exists($file) && !is_writable($file)) {
             die("数据库文件 $file 不可写");
@@ -47,7 +47,7 @@ function alan_db(): PDO {
         try {
             $db = new PDO("sqlite:$file");
             $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            
+
             // 初始化表结构
             $db->exec("
                 CREATE TABLE IF NOT EXISTS words (

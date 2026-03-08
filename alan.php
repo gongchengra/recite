@@ -85,7 +85,7 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
     <p style="text-align:center;color:#999;padding:40px;">🎉 太棒了！今日待复习单词已全部清空。</p>
 <?php else: ?>
     <div class="stats-bar">
-        今日待复习：<span style="color:#dc3545;"><?= $review_count ?></span> 个单词 | 
+        今日待复习：<span style="color:#dc3545;"><?= $review_count ?></span> 个单词 |
         预计耗时：<span style="color:#007bff;"><?= $estimated_time ?></span>
     </div>
 
@@ -98,8 +98,8 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
         <h3 style="margin-top:0;"><?= h($w['word']) ?></h3>
         <p style="color:#666;line-height:1.6;"><?= nl2br(h($w['meaning'])) ?></p>
         <div style="font-size:12px;color:#999;margin-top:15px;">
-            上次：<?= format_time((int)$w['last_studied_at']) ?> | 
-            下次：<?= $w['next_review_at'] == 0 ? '立即' : ($due ? '<span style="color:#dc3545;font-weight:bold;">已到期</span>' : format_time((int)$w['next_review_at'])) ?> | 
+            上次：<?= format_time((int)$w['last_studied_at']) ?> |
+            下次：<?= $w['next_review_at'] == 0 ? '立即' : ($due ? '<span style="color:#dc3545;font-weight:bold;">已到期</span>' : format_time((int)$w['next_review_at'])) ?> |
             等级：<?= $w['memory_level'] ?>/9
         </div>
 

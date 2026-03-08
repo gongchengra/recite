@@ -15,13 +15,13 @@ if (($_POST['action'] ?? '') === 'update') {
     $id = (int)$_POST['id'];
     $memory_level = (int)$_POST['memory_level'];
     $is_mastered = isset($_POST['is_mastered']) ? (int)$_POST['is_mastered'] : 0;
-    
-    $next_review_at = $_POST['next_review_at'] === 'custom' 
-        ? strtotime($_POST['custom_time']) 
+
+    $next_review_at = $_POST['next_review_at'] === 'custom'
+        ? strtotime($_POST['custom_time'])
         : calculate_next_review_time($memory_level);
-        
-    $last_studied_at = $_POST['last_studied_at'] === 'custom' 
-        ? strtotime($_POST['custom_last_time']) 
+
+    $last_studied_at = $_POST['last_studied_at'] === 'custom'
+        ? strtotime($_POST['custom_last_time'])
         : ($_POST['last_studied_at'] === 'now' ? time() : null);
 
     try {
