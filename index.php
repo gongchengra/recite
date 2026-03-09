@@ -33,8 +33,8 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
     <style>
         body{font-family:system-ui,-apple-system,sans-serif;max-width:800px;margin:auto;padding:20px;background:#f9f9f9;color:#333;}
         h1{text-align:center;color:#2c3e50;margin-top:10px;}
-        .msg-container{position:sticky;top:10px;z-index:100;}
-        .msg{padding:12px;margin:10px 0;border-radius:6px;font-weight:bold;box-shadow:0 2px 5px rgba(0,0,0,0.1);text-align:center;background:#fff;}
+        .msg-container{margin: 10px 0;}
+        .msg{padding:12px;border-radius:6px;font-weight:bold;box-shadow:0 2px 5px rgba(0,0,0,0.05);text-align:center;background:#fff;border:1px solid #eee;}
         .msg:empty{display:none;}
         .card{background:#fff;border:1px solid #eee;padding:20px;margin:15px 0;border-radius:8px;position:relative;transition:transform 0.2s;}
         .card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.05);}
