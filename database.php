@@ -169,7 +169,7 @@ function page_url($p) {
     <div style="display:flex; align-items:center; gap:15px;">
         <input type="text" id="searchWord" placeholder="搜索单词..." style="padding:8px 12px; border-radius:4px; border:none; outline:none; width:200px;">
         <span style="font-size:0.9em; color:#999;"><?= $total_words ?> 词 | <?= $page ?>/<?= $total_pages ?> 页</span>
-        <a href="alan.php">返回复习</a>
+        <a href="index.php">返回复习</a>
         <a href="?logout=1">退出</a>
     </div>
 </div>
