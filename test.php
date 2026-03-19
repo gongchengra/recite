@@ -25,7 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             case 'vague': // 有印象：等级 3，复习时间明天
                 $db->prepare("UPDATE words SET memory_level = 3, next_review_at = ?, last_studied_at = ?, is_mastered = 0 WHERE id = ?")
                    ->execute([$tomorrow, $now, $id]);
-                echo json_encode(['success' => true, 'message' => '已调整为等级 4，明天复习']);
+                echo json_encode(['success' => true, 'message' => '已调整为等级 3，明天复习']);
                 break;
             case 'remember': // 记得：等级和时间不变
                 echo json_encode(['success' => true, 'message' => '继续保持！']);
@@ -101,7 +101,9 @@ $test_words = $stmt->fetchAll(PDO::FETCH_ASSOC);
         <div id="test-list">
             <?php foreach ($test_words as $w): ?>
                 <div class="word-item" id="word-<?= $w['id'] ?>">
-                    <span class="word-text"><?= h($w['word']) ?></span>
+                    <span class="word-text">
+                        <a href="<?= h($w['word']) ?>.html" target="_blank" style="color:inherit;text-decoration:none;"><?= h($w['word']) ?></a>
+                    </span>
                     <div class="options">
                         <button class="option-btn btn-none" data-id="<?= $w['id'] ?>" data-choice="none">完全不记得</button>
                         <button class="option-btn btn-vague" data-id="<?= $w['id'] ?>" data-choice="vague">有印象</button>

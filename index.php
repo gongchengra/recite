@@ -18,6 +18,7 @@ if (!$msg) {
 $words_to_review = get_words_to_review($db);
 $review_count = count($words_to_review);
 $estimated_time = $review_count > 0 ? floor($review_count * 10 / 60) . " 分 " . ($review_count * 10 % 60) . " 秒" : "0 秒";
+$max_level = count($GLOBALS['config']['ebbinghaus_intervals']) - 1;
 
 // 表单保留
 $retain_word    = $_POST['new_word'] ?? '';
@@ -114,12 +115,14 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
     ?>
     <div class="card <?= $cls ?>">
         <button type="button" class="card-menu-btn">⋮</button>
-        <h3 style="margin-top:0;font-size:1.4em;"><?= h($w['word']) ?></h3>
+        <h3 style="margin-top:0;font-size:1.4em;">
+            <a href="<?= h($w['word']) ?>.html" target="_blank" style="color:inherit;text-decoration:none;"><?= h($w['word']) ?></a>
+        </h3>
         <p style="color:#666;line-height:1.6;font-size:1.05em;"><?= nl2br(h($w['meaning'])) ?></p>
         <div style="font-size:12px;color:#999;margin-top:15px;border-top:1px solid #f5f5f5;padding-top:10px;">
             上次：<?= format_time((int)$w['last_studied_at']) ?> |
             下次：<?= $w['next_review_at'] == 0 ? '立即' : ($due ? '<span style="color:#dc3545;font-weight:bold;">已到期</span>' : format_time((int)$w['next_review_at'])) ?> |
-            等级：<?= $w['memory_level'] ?>/9
+            等级：<?= $w['memory_level'] ?>/<?= $max_level ?>
         </div>
 
         <div style="margin-top:15px;">

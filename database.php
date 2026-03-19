@@ -9,6 +9,7 @@ require_once __DIR__ . '/alan.func.php';    // 公共函数
 $db = alan_db();
 $config = $GLOBALS['config'];
 $per_page = 100;
+$max_level = count($config['ebbinghaus_intervals']) - 1;
 
 // ==================== AJAX 更新 ====================
 if (($_POST['action'] ?? '') === 'update') {
@@ -72,12 +73,12 @@ if (($_GET['action'] ?? '') === 'search') {
 
     ob_start();
     ?>
-    <tr data-id="<?= $row['id'] ?>">
+        <tr data-id="<?= $row['id'] ?>">
         <td><strong><?= h($row['word']) ?></strong></td>
         <td style="max-width:300px; word-wrap:break-word;"><?= nl2br(h($row['meaning'])) ?></td>
         <td>
             <span class="level-display"><?= $row['memory_level'] ?></span>
-            <input type="number" class="level-input" min="0" max="9" value="<?= $row['memory_level'] ?>" style="display:none;">
+            <input type="number" class="level-input" min="0" max="<?= $max_level ?>" value="<?= $row['memory_level'] ?>" style="display:none;">
         </td>
         <td>
             <span class="last-display" data-timestamp="<?= $row['last_studied_at'] ?>"><?= format_time((int)$row['last_studied_at']) ?></span>
@@ -192,7 +193,7 @@ function page_url($p) {
             <td style="max-width:300px; word-wrap:break-word;"><?= nl2br(h($w['meaning'])) ?></td>
             <td>
                 <span class="level-display"><?= $w['memory_level'] ?></span>
-                <input type="number" class="level-input" min="0" max="9" value="<?= $w['memory_level'] ?>" style="display:none;">
+                <input type="number" class="level-input" min="0" max="<?= $max_level ?>" value="<?= $w['memory_level'] ?>" style="display:none;">
             </td>
             <td>
                 <span class="last-display" data-timestamp="<?= $w['last_studied_at'] ?>"><?= format_time((int)$w['last_studied_at']) ?></span>
