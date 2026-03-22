@@ -2,7 +2,9 @@
 // test.php - 单词掌握测试页面
 declare(strict_types=1);
 
-require_once __DIR__ . '/alan.func.php';
+require_once __DIR__ . '/alan.login.php';   // 登录与权限校验
+check_login();                             // 强制测试页面登录
+require_once __DIR__ . '/alan.func.php';    // 公共函数与业务逻辑
 
 $db = alan_db();
 $msg = '';
