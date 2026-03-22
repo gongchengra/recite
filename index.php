@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/alan.login.php';   // 登录与权限校验
+check_login();                             // 强制首页登录
 require_once __DIR__ . '/alan.func.php';    // 公共函数与业务逻辑
 
 $db = alan_db();
@@ -72,13 +73,8 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
         <a href="test.php">掌握测试</a>
     </div>
     <div style="color:#999;">
-        <?php if (!empty($_SESSION['alan_auth'])): ?>
-            用户: <span style="color:#333;font-weight:bold;"><?=h($_SESSION['alan_user'])?></span> | 
-            <a href="?logout=1" style="color:#dc3545;">退出登录</a>
-        <?php else: ?>
-            <span style="color:#666;">游客模式 (words.sqlite)</span> | 
-            <a href="alan.login.php" style="color:#007bff;font-weight:bold;">登录/切换用户</a>
-        <?php endif; ?>
+        用户: <span style="color:#333;font-weight:bold;"><?=h($_SESSION['alan_user'])?></span> | 
+        <a href="?logout=1" style="color:#dc3545;">退出登录</a>
     </div>
 </div>
 
