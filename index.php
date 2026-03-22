@@ -82,7 +82,7 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
     </div>
 </div>
 
-<h1>Alan 单词复习</h1>
+<h1>Jimmy 单词复习</h1>
 
 <div class="msg-container" id="msg-anchor">
     <div id="msg"><?= $msg ?></div>
