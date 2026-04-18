@@ -8,7 +8,6 @@ ini_set('display_errors', 1);
 error_reporting(E_ALL);
 
 // ==================== 登录逻辑 ====================
-// 防暴力破解
 function is_locked_out(string $ip, string $user): array|false {
     $config = $GLOBALS['config'];
     $data = load_json($config['lockout_file']);
@@ -23,6 +22,7 @@ function is_locked_out(string $ip, string $user): array|false {
     }
     return false;
 }
+
 function record_failed(string $ip, string $user): void {
     $config = $GLOBALS['config'];
     $data = load_json($config['lockout_file']);
@@ -31,6 +31,7 @@ function record_failed(string $ip, string $user): void {
     if ($data[$key]['attempts'] >= $config['max_attempts']) $data[$key]['locked_at'] = time();
     save_json($config['lockout_file'], $data);
 }
+
 function clear_attempts(string $ip, string $user): void {
     $config = $GLOBALS['config'];
     $data = load_json($config['lockout_file']);
@@ -72,6 +73,7 @@ function show_login(string $error = ''): void {
                 登录 (剩余 <?=$left?> 次)
             </button>
         </form>
+        <p class="info" style="margin-top:10px;">本次登录后，同一浏览器将保持登录状态 1 年</p>
         <?php if($left<=2 && $left>0):?>
             <p class="msg warning">还剩 <?=$left?> 次机会，失败将锁定 15 分钟！</p>
         <?php endif;?>
@@ -93,7 +95,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['login'])) {
         show_login('账号被锁定，请稍后重试');
     }
 
-    $all_auth = load_json($config['auth_file']); // 格式: {"user1": {"password": "hash", "db_file": "..."}, "user2": ...}
+    $all_auth = load_json($config['auth_file']);
 
     // 处理首次设置（如果是空文件）
     if (empty($all_auth)) {
@@ -105,7 +107,7 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['login'])) {
         $new_auth = [
             $user => [
                 'password' => $hash,
-                'db_file'  => ALAN_ROOT . '/words.sqlite' // 默认第一个用户的数据库
+                'db_file'  => ALAN_ROOT . '/words.sqlite'
             ]
         ];
         save_json($config['auth_file'], $new_auth);
@@ -113,6 +115,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['login'])) {
         $_SESSION['alan_auth'] = true;
         $_SESSION['alan_user'] = $user;
         $_SESSION['alan_db']   = $new_auth[$user]['db_file'];
+
+        set_remember_me($user);                    // 新增：记住 1 年
         header('Location: index.php');
         exit;
     }
@@ -123,6 +127,8 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['login'])) {
         $_SESSION['alan_auth'] = true;
         $_SESSION['alan_user'] = $user;
         $_SESSION['alan_db']   = $all_auth[$user]['db_file'] ?? (ALAN_ROOT . '/words.sqlite');
+
+        set_remember_me($user);                    // 新增：记住 1 年
         header('Location: index.php');
         exit;
     } else {
@@ -133,6 +139,14 @@ if ($_SERVER['REQUEST_METHOD']==='POST' && isset($_POST['login'])) {
 
 // 退出
 if (isset($_GET['logout'])) {
+    // 清除 Remember Me token
+    if (isset($_COOKIE['alan_remember'])) {
+        $token = $_COOKIE['alan_remember'];
+        $remember_data = load_json($GLOBALS['config']['remember_file']);
+        unset($remember_data[$token]);
+        save_json($GLOBALS['config']['remember_file'], $remember_data);
+        setcookie('alan_remember', '', time() - 3600, '/', '', false, true);
+    }
     session_destroy();
     header('Location: index.php');
     exit;
@@ -145,7 +159,7 @@ if (basename($_SERVER['PHP_SELF']) === 'alan.login.php' && empty($_SESSION['alan
 
 // 必须登录（仅在需要保护的页面调用）
 function check_login(): void {
-    if (empty($_SESSION['alan_auth'])) {
+    if (!try_remember_me_login()) {
         show_login();
     }
 }
