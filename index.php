@@ -16,8 +16,8 @@ if (!$msg) {
 }
 
 // ==================== 数据获取 ====================
-$words_to_review = get_words_to_review($db);
 $review_count = get_review_total_count($db);
+$words_to_review = get_words_to_review($db, $review_count);
 $estimated_time = $review_count > 0 ? floor($review_count * 10 / 60) . " 分 " . ($review_count * 10 % 60) . " 秒" : "0 秒";
 $max_level = count($GLOBALS['config']['ebbinghaus_intervals']) - 1;
 

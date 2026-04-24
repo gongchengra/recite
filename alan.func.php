@@ -211,7 +211,9 @@ function get_words_to_review(PDO $db, int $limit = 100): array {
         ORDER BY next_review_at ASC
         LIMIT ?
     ");
-    $stmt->execute([$today_end, $limit]);
+    $stmt->bindValue(1, $today_end, PDO::PARAM_INT);
+    $stmt->bindValue(2, $limit, PDO::PARAM_INT);
+    $stmt->execute();
     return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
