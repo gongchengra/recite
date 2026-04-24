@@ -17,9 +17,16 @@ if (!$msg) {
 
 // ==================== 数据获取 ====================
 $words_to_review = get_words_to_review($db);
-$review_count = count($words_to_review);
+$review_count = get_review_total_count($db);
 $estimated_time = $review_count > 0 ? floor($review_count * 10 / 60) . " 分 " . ($review_count * 10 % 60) . " 秒" : "0 秒";
 $max_level = count($GLOBALS['config']['ebbinghaus_intervals']) - 1;
+
+$words_grouped = [];
+foreach ($words_to_review as $w) {
+    $lvl = (int)$w['memory_level'];
+    $words_grouped[$lvl][] = $w;
+}
+ksort($words_grouped);
 
 // 表单保留
 $retain_word    = $_POST['new_word'] ?? '';
@@ -63,6 +70,10 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
         .nav-links{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:14px;}
         .nav-links a{color:#666;text-decoration:none;transition:color 0.2s;}
         .nav-links a:hover{color:#333;}
+        .group{margin:18px 0;}
+        .group-toggle{width:100%;text-align:left;background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;padding:10px 12px;border-radius:8px;font-weight:700;}
+        .group-body{margin-top:10px;}
+        .group-body.is-collapsed{display:none;}
     </style>
 </head>
 <body>
@@ -105,43 +116,52 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
         预计耗时：<span style="color:#007bff;"><?= $estimated_time ?></span>
     </div>
 
-    <?php foreach ($words_to_review as $w):
-        $due = $w['next_review_at'] > 0 && $w['next_review_at'] <= time();
-        $cls = $w['memory_level'] == 0 ? 'new' : ($due ? 'due' : 'ok');
-    ?>
-    <div class="card <?= $cls ?>">
-        <button type="button" class="card-menu-btn">⋮</button>
-        <h3 style="margin-top:0;font-size:1.4em;">
-            <a href="<?= h($w['word']) ?>.html" target="_blank" style="color:inherit;text-decoration:none;"><?= h($w['word']) ?></a>
-        </h3>
-        <p style="color:#666;line-height:1.6;font-size:1.05em;"><?= nl2br(h($w['meaning'])) ?></p>
-        <div style="font-size:12px;color:#999;margin-top:15px;border-top:1px solid #f5f5f5;padding-top:10px;">
-            上次：<?= format_time((int)$w['last_studied_at']) ?> |
-            下次：<?= $w['next_review_at'] == 0 ? '立即' : ($due ? '<span style="color:#dc3545;font-weight:bold;">已到期</span>' : format_time((int)$w['next_review_at'])) ?> |
-            等级：<?= $w['memory_level'] ?>/<?= $max_level ?>
-        </div>
+    <?php foreach ($words_grouped as $lvl => $list): ?>
+        <div class="group">
+            <button type="button" class="group-toggle" data-target="group-<?= (int)$lvl ?>">
+                等级 <?= (int)$lvl ?>/<?= $max_level ?>（<?= count($list) ?>）
+            </button>
+            <div class="group-body" id="group-<?= (int)$lvl ?>">
+                <?php foreach ($list as $w):
+                    $due = $w['next_review_at'] > 0 && $w['next_review_at'] <= time();
+                    $cls = $w['memory_level'] == 0 ? 'new' : ($due ? 'due' : 'ok');
+                ?>
+                <div class="card <?= $cls ?>">
+                    <button type="button" class="card-menu-btn">⋮</button>
+                    <h3 style="margin-top:0;font-size:1.4em;">
+                        <a href="<?= h($w['word']) ?>.html" target="_blank" style="color:inherit;text-decoration:none;"><?= h($w['word']) ?></a>
+                    </h3>
+                    <p style="color:#666;line-height:1.6;font-size:1.05em;"><?= nl2br(h($w['meaning'])) ?></p>
+                    <div style="font-size:12px;color:#999;margin-top:15px;border-top:1px solid #f5f5f5;padding-top:10px;">
+                        上次：<?= format_time((int)$w['last_studied_at']) ?> |
+                        下次：<?= $w['next_review_at'] == 0 ? '立即' : ($due ? '<span style="color:#dc3545;font-weight:bold;">已到期</span>' : format_time((int)$w['next_review_at'])) ?> |
+                        等级：<?= $w['memory_level'] ?>/<?= $max_level ?>
+                    </div>
 
-        <div style="margin-top:15px;">
-            <form method="POST" style="display:inline;">
-                <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
-                <input type="hidden" name="review_action" value="remembered">
-                <button type="submit" class="btn-remember">我记住了</button>
-            </form>
-        </div>
+                    <div style="margin-top:15px;">
+                        <form method="POST" style="display:inline;">
+                            <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
+                            <input type="hidden" name="review_action" value="remembered">
+                            <button type="submit" class="btn-remember">我记住了</button>
+                        </form>
+                    </div>
 
-        <div class="card-menu">
-            <form method="POST" style="margin:0;">
-                <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
-                <input type="hidden" name="review_action" value="forgotten">
-                <button type="submit" class="btn-forgot">我忘记了</button>
-            </form>
-            <form method="POST" style="margin:0;">
-                <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
-                <input type="hidden" name="review_action" value="mastered">
-                <button type="submit" class="btn-mastered">已完全记住</button>
-            </form>
+                    <div class="card-menu">
+                        <form method="POST" style="margin:0;">
+                            <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
+                            <input type="hidden" name="review_action" value="forgotten">
+                            <button type="submit" class="btn-forgot">我忘记了</button>
+                        </form>
+                        <form method="POST" style="margin:0;">
+                            <input type="hidden" name="review_id" value="<?= $w['id'] ?>">
+                            <input type="hidden" name="review_action" value="mastered">
+                            <button type="submit" class="btn-mastered">已完全记住</button>
+                        </form>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
         </div>
-    </div>
     <?php endforeach; ?>
 <?php endif; ?>
 
@@ -171,6 +191,11 @@ $(function(){
     });
 
     $(document).on('click', () => $('.card-menu.show').removeClass('show'));
+
+    $('.group-toggle').on('click', function(){
+        const target = $(this).data('target');
+        $('#' + target).toggleClass('is-collapsed');
+    });
 
     function showMsg(html){
         $msg.html('<div class="msg">' + html + '</div>');

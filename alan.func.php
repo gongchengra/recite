@@ -191,6 +191,17 @@ function handle_review_action(PDO $db): string {
     return '';
 }
 
+function get_review_total_count(PDO $db): int {
+    $today_end = strtotime('today') + 86399;
+    $stmt = $db->prepare("
+        SELECT COUNT(*) AS c FROM words
+        WHERE (next_review_at = 0 OR next_review_at <= ?)
+          AND (is_mastered IS NULL OR is_mastered = 0)
+    ");
+    $stmt->execute([$today_end]);
+    return (int)($stmt->fetch(PDO::FETCH_ASSOC)['c'] ?? 0);
+}
+
 function get_words_to_review(PDO $db, int $limit = 100): array {
     $today_end = strtotime('today') + 86399;
     $stmt = $db->prepare("
