@@ -47,6 +47,8 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
         .msg:empty{display:none;}
         .card{background:#fff;border:1px solid #eee;padding:20px;margin:15px 0;border-radius:8px;position:relative;transition:transform 0.2s;}
         .card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.05);}
+        .card-meaning{display:none;}
+        .card.is-expanded .card-meaning{display:block;}
         .new{border-left:5px solid #007bff;}
         .due{border-left:5px solid #dc3545;}
         .ok{border-left:5px solid #28a745;}
@@ -131,7 +133,7 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
                     <h3 style="margin-top:0;font-size:1.4em;">
                         <a href="<?= h($w['word']) ?>.html" target="_blank" style="color:inherit;text-decoration:none;"><?= h($w['word']) ?></a>
                     </h3>
-                    <p style="color:#666;line-height:1.6;font-size:1.05em;"><?= nl2br(h($w['meaning'])) ?></p>
+                    <div class="card-meaning" style="color:#666;line-height:1.6;font-size:1.05em;"><?= nl2br(h($w['meaning'])) ?></div>
                     <div style="font-size:12px;color:#999;margin-top:15px;border-top:1px solid #f5f5f5;padding-top:10px;">
                         上次：<?= format_time((int)$w['last_studied_at']) ?> |
                         下次：<?= $w['next_review_at'] == 0 ? '立即' : ($due ? '<span style="color:#dc3545;font-weight:bold;">已到期</span>' : format_time((int)$w['next_review_at'])) ?> |
@@ -188,6 +190,28 @@ $(function(){
         const $m = $(this).siblings('.card-menu');
         $('.card-menu.show').not($m).removeClass('show');
         $m.toggleClass('show');
+    });
+
+    // 点击卡片：3 秒后展开释义（再次点击可收起并取消定时器）
+    $('.card').on('click', function(e){
+        if($(e.target).closest('button, a, form, input, textarea, .card-menu').length) return;
+
+        const $card = $(this);
+        const t = $card.data('revealTimer');
+
+        if($card.hasClass('is-expanded')){
+            if(t) clearTimeout(t);
+            $card.removeData('revealTimer');
+            $card.removeClass('is-expanded');
+            return;
+        }
+
+        if(t) clearTimeout(t);
+        const timer = setTimeout(() => {
+            $card.addClass('is-expanded');
+            $card.removeData('revealTimer');
+        }, 3000);
+        $card.data('revealTimer', timer);
     });
 
     $(document).on('click', () => $('.card-menu.show').removeClass('show'));
