@@ -76,7 +76,12 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
         .group-toggle{width:100%;text-align:left;background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;padding:10px 12px;border-radius:8px;font-weight:700;}
         .group-body{margin-top:10px;}
         .group-body.is-collapsed{display:none;}
-        .word-toggle{color:inherit;text-decoration:none;cursor:pointer;}
+        .word-row{display:flex;align-items:center;gap:10px;padding-right:40px;}
+        .word-link{color:inherit;text-decoration:none;}
+        .word-link:hover{text-decoration:underline;}
+        .word-toggle-area{flex:1;min-height:32px;display:flex;align-items:center;cursor:pointer;border-radius:6px;padding:4px 8px;margin-left:-8px;}
+        .word-toggle-area:hover{background:#f5f7fb;}
+        .meaning-toggle-btn{background:#eef2ff;color:#374151;padding:6px 12px;font-size:13px;margin:0;white-space:nowrap;}
     </style>
 </head>
 <body>
@@ -132,7 +137,11 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
                 <div class="card <?= $cls ?>">
                     <button type="button" class="card-menu-btn">⋮</button>
                     <h3 style="margin-top:0;font-size:1.4em;">
-                        <a href="<?= h($w['word']) ?>.html" target="_blank" class="word-toggle"><?= h($w['word']) ?></a>
+                        <div class="word-row">
+                            <a href="<?= h($w['word']) ?>.html" target="_blank" class="word-link"><?= h($w['word']) ?></a>
+                            <div class="word-toggle-area" role="button" tabindex="0" aria-label="显示或隐藏释义"></div>
+                            <button type="button" class="meaning-toggle-btn">显示释义</button>
+                        </div>
                     </h3>
                     <div class="card-meaning" style="color:#666;line-height:1.6;font-size:1.05em;"><?= nl2br(h($w['meaning'])) ?></div>
                     <div style="font-size:12px;color:#999;margin-top:15px;border-top:1px solid #f5f5f5;padding-top:10px;">
@@ -193,26 +202,51 @@ $(function(){
         $m.toggleClass('show');
     });
 
-    // 只点击单词时：1 秒后展开释义；再次点击则收起并取消定时器
-    $('.word-toggle').on('click', function(e){
-        e.preventDefault();
+    function updateToggleButton($card){
+        const $btn = $card.find('.meaning-toggle-btn').first();
+        $btn.text($card.hasClass('is-expanded') ? '隐藏释义' : '显示释义');
+    }
 
-        const $card = $(this).closest('.card');
+    function scheduleExpand($card){
         const t = $card.data('revealTimer');
-
-        if($card.hasClass('is-expanded')){
-            if(t) clearTimeout(t);
-            $card.removeData('revealTimer');
-            $card.removeClass('is-expanded');
-            return;
-        }
-
         if(t) clearTimeout(t);
         const timer = setTimeout(() => {
             $card.addClass('is-expanded');
             $card.removeData('revealTimer');
+            updateToggleButton($card);
         }, 1000);
         $card.data('revealTimer', timer);
+    }
+
+    function collapseMeaning($card){
+        const t = $card.data('revealTimer');
+        if(t) clearTimeout(t);
+        $card.removeData('revealTimer');
+        $card.removeClass('is-expanded');
+        updateToggleButton($card);
+    }
+
+    function toggleMeaning($card){
+        if($card.hasClass('is-expanded')){
+            collapseMeaning($card);
+        } else {
+            scheduleExpand($card);
+        }
+    }
+
+    $('.word-toggle-area').on('click', function(){
+        toggleMeaning($(this).closest('.card'));
+    });
+
+    $('.word-toggle-area').on('keydown', function(e){
+        if(e.key === 'Enter' || e.key === ' '){
+            e.preventDefault();
+            toggleMeaning($(this).closest('.card'));
+        }
+    });
+
+    $('.meaning-toggle-btn').on('click', function(){
+        toggleMeaning($(this).closest('.card'));
     });
 
     $(document).on('click', () => $('.card-menu.show').removeClass('show'));
@@ -220,6 +254,10 @@ $(function(){
     $('.group-toggle').on('click', function(){
         const target = $(this).data('target');
         $('#' + target).toggleClass('is-collapsed');
+    });
+
+    $('.card').each(function(){
+        updateToggleButton($(this));
     });
 
     function showMsg(html){
