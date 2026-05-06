@@ -76,6 +76,7 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
         .group-toggle{width:100%;text-align:left;background:#f1f5f9;color:#334155;border:1px solid #e2e8f0;padding:10px 12px;border-radius:8px;font-weight:700;}
         .group-body{margin-top:10px;}
         .group-body.is-collapsed{display:none;}
+        .word-toggle{color:inherit;text-decoration:none;cursor:pointer;}
     </style>
 </head>
 <body>
@@ -131,7 +132,7 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
                 <div class="card <?= $cls ?>">
                     <button type="button" class="card-menu-btn">⋮</button>
                     <h3 style="margin-top:0;font-size:1.4em;">
-                        <a href="<?= h($w['word']) ?>.html" target="_blank" style="color:inherit;text-decoration:none;"><?= h($w['word']) ?></a>
+                        <a href="<?= h($w['word']) ?>.html" target="_blank" class="word-toggle"><?= h($w['word']) ?></a>
                     </h3>
                     <div class="card-meaning" style="color:#666;line-height:1.6;font-size:1.05em;"><?= nl2br(h($w['meaning'])) ?></div>
                     <div style="font-size:12px;color:#999;margin-top:15px;border-top:1px solid #f5f5f5;padding-top:10px;">
@@ -192,11 +193,11 @@ $(function(){
         $m.toggleClass('show');
     });
 
-    // 点击卡片：3 秒后展开释义（再次点击可收起并取消定时器）
-    $('.card').on('click', function(e){
-        if($(e.target).closest('button, a, form, input, textarea, .card-menu').length) return;
+    // 只点击单词时：1 秒后展开释义；再次点击则收起并取消定时器
+    $('.word-toggle').on('click', function(e){
+        e.preventDefault();
 
-        const $card = $(this);
+        const $card = $(this).closest('.card');
         const t = $card.data('revealTimer');
 
         if($card.hasClass('is-expanded')){
@@ -210,7 +211,7 @@ $(function(){
         const timer = setTimeout(() => {
             $card.addClass('is-expanded');
             $card.removeData('revealTimer');
-        }, 3000);
+        }, 1000);
         $card.data('revealTimer', timer);
     });
 
