@@ -207,21 +207,12 @@ $(function(){
         $btn.text($card.hasClass('is-expanded') ? '隐藏释义' : '显示释义');
     }
 
-    function scheduleExpand($card){
-        const t = $card.data('revealTimer');
-        if(t) clearTimeout(t);
-        const timer = setTimeout(() => {
-            $card.addClass('is-expanded');
-            $card.removeData('revealTimer');
-            updateToggleButton($card);
-        }, 1000);
-        $card.data('revealTimer', timer);
+    function expandMeaning($card){
+        $card.addClass('is-expanded');
+        updateToggleButton($card);
     }
 
     function collapseMeaning($card){
-        const t = $card.data('revealTimer');
-        if(t) clearTimeout(t);
-        $card.removeData('revealTimer');
         $card.removeClass('is-expanded');
         updateToggleButton($card);
     }
@@ -230,7 +221,7 @@ $(function(){
         if($card.hasClass('is-expanded')){
             collapseMeaning($card);
         } else {
-            scheduleExpand($card);
+            expandMeaning($card);
         }
     }
 
