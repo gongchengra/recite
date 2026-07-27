@@ -6,11 +6,6 @@ require_once __DIR__ . '/alan.login.php';
 check_login();
 require_once __DIR__ . '/alan.func.php';
 
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    header('Location: index.php');
-    exit;
-}
-
 $db = alan_db();
 
 $review_count = get_review_total_count($db);
