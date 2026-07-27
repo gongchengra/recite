@@ -14,23 +14,12 @@ $msg = handle_word_update($db);
 if (!$msg) {
     $msg = handle_review_action($db);
 }
-if (!$msg && !empty($_SESSION['done_msg'])) {
-    $msg = $_SESSION['done_msg'];
-    unset($_SESSION['done_msg']);
-}
 
 // ==================== 数据获取 ====================
 $review_count = get_review_total_count($db);
 $words_to_review = get_words_to_review($db, $review_count);
 $estimated_time = $review_count > 0 ? floor($review_count * 10 / 60) . " 分 " . ($review_count * 10 % 60) . " 秒" : "0 秒";
 $max_level = count($GLOBALS['config']['ebbinghaus_intervals']) - 1;
-
-$auto_done_count = 0;
-foreach ($words_to_review as $w) {
-    if ((int)$w['memory_level'] > 0) {
-        $auto_done_count++;
-    }
-}
 
 $words_grouped = [];
 foreach ($words_to_review as $w) {
@@ -66,7 +55,6 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
         textarea{width:100%;font-family:inherit;padding:12px;border:1px solid #ddd;border-radius:8px;box-sizing:border-box;font-size:16px;}
         button{padding:10px 20px;cursor:pointer;margin:5px;border:none;border-radius:6px;font-size:14px;transition:opacity 0.2s;}
         button:hover{opacity:0.9;}
-        button:disabled{cursor:not-allowed;opacity:0.55;}
         .btn-remember{background:#28a745;color:#fff;}
         .btn-forgot{background:#dc3545;color:#fff;}
         .btn-mastered{background:#6f42c1;color:#fff;}
@@ -75,9 +63,6 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
         .search-btn{background:#007bff;color:#fff;white-space:nowrap;}
         .submit-btn{background:#333;color:#fff;width:100%;font-size:16px;margin:0;}
         .stats-bar{background:#e7f3ff;padding:15px;margin:20px 0;border-radius:8px;font-size:1.1em;font-weight:bold;text-align:center;color:#0056b3;}
-        .stats-actions{margin-top:12px;}
-        .done-btn{background:#16a34a;color:#fff;font-weight:bold;}
-        .done-hint{display:block;margin-top:5px;color:#64748b;font-size:12px;font-weight:normal;}
         .card-menu-btn{position:absolute;top:10px;right:10px;background:none;border:none;font-size:20px;cursor:pointer;color:#999;padding:5px;}
         .card-menu{position:absolute;top:40px;right:10px;background:#fff;border:1px solid #ddd;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,0.1);z-index:10;display:none;overflow:hidden;}
         .card-menu.show{display:block;}
@@ -137,14 +122,6 @@ $retain_meaning = $_POST['new_meaning'] ?? '';
     <div class="stats-bar">
         今日待复习：<span style="color:#dc3545;"><?= $review_count ?></span> 个单词 |
         预计耗时：<span style="color:#007bff;"><?= $estimated_time ?></span>
-        <div class="stats-actions">
-            <form method="POST" action="done.php" id="doneForm" style="display:inline;">
-                <button type="submit" class="done-btn" <?= $auto_done_count === 0 ? 'disabled' : '' ?>>
-                    一键记住已复习词（<?= $auto_done_count ?>）
-                </button>
-            </form>
-            <span class="done-hint">仅处理今天列表中等级大于 0 的单词，新词不会被一键处理。</span>
-        </div>
     </div>
 
     <?php foreach ($words_grouped as $lvl => $list): ?>
@@ -261,12 +238,6 @@ $(function(){
 
     $('.meaning-toggle-btn').on('click', function(){
         toggleMeaning($(this).closest('.card'));
-    });
-
-    $('#doneForm').on('submit', function(e){
-        if(!confirm('确定要将今天列表中等级大于 0 的单词全部标记为“我记住了”吗？')){
-            e.preventDefault();
-        }
     });
 
     $(document).on('click', () => $('.card-menu.show').removeClass('show'));
